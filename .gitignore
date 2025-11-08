@@ -1,0 +1,92 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+mcp-code-api
+mcp-code-api_unix
+test_mcp_providers
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.coverprofile
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go build cache
+.cache/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Configuration files (may contain API keys)
+*.yaml
+*.yml
+!config.example.yaml
+!.github/workflows/*.yml
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# Build artifacts
+dist/
+release/
+build/
+bin/
+
+# Test outputs
+/tmp/test_*.txt
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Debug files
+debug
+__debug_bin
+
+# Profiling files
+*.prof
+*.pprof
+*.cpu
+*.mem
+
+# Documentation build
+docs/_build/
+
+# Local development
+.local/
+local/

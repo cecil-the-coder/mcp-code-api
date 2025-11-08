@@ -1,0 +1,101 @@
+# Example Configuration with Multiple API Keys
+# This demonstrates load balancing and failover with multiple API keys per provider
+
+server:
+  name: "mcp-code-api"
+  version: "1.0.0"
+  description: "Multi-Provider MCP Server with Load Balancing"
+  timeout: "60s"
+
+providers:
+  # Cerebras with multiple API keys for load balancing
+  cerebras:
+    # Option 1: Use api_keys array for multiple keys
+    api_keys:
+      - "${CEREBRAS_API_KEY_1}"  # Primary key
+      - "${CEREBRAS_API_KEY_2}"  # Secondary key
+      - "${CEREBRAS_API_KEY_3}"  # Tertiary key
+
+    # Or Option 2: Use single api_key (backward compatible)
+    # api_key: "${CEREBRAS_API_KEY}"
+
+    model: "zai-glm-4.6"
+    max_tokens: 8000
+    temperature: 0.1
+    base_url: "https://api.cerebras.ai"
+
+  # OpenRouter with multiple API keys
+  openrouter:
+    api_keys:
+      - "${OPENROUTER_API_KEY_1}"
+      - "${OPENROUTER_API_KEY_2}"
+    model: "qwen/qwen3-coder"
+    site_url: "https://github.com/cerebras/cerebras-code-mcp"
+    site_name: "Cerebras MCP"
+    base_url: "https://openrouter.ai/api"
+
+  # OpenAI with single key (backward compatible)
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    base_url: "https://api.openai.com/v1"
+    use_responses_api: false
+
+  # Anthropic with multiple keys for high availability
+  anthropic:
+    api_keys:
+      - "${ANTHROPIC_KEY_1}"
+      - "${ANTHROPIC_KEY_2}"
+    model: "claude-3-5-sonnet-20241022"
+    base_url: "https://api.anthropic.com"
+
+  # Gemini with single key
+  gemini:
+    api_key: "${GEMINI_API_KEY}"
+    model: "gemini-1.5-pro"
+    base_url: "https://generativelanguage.googleapis.com"
+
+  # Provider ordering and enabling
+  preferred_order:
+    - cerebras      # Try Cerebras first
+    - openrouter    # Then OpenRouter
+    - openai        # Then OpenAI
+    - anthropic     # Then Anthropic
+    - gemini        # Finally Gemini
+
+  enabled:
+    - cerebras
+    - openrouter
+    - openai
+    - anthropic
+    - gemini
+
+logging:
+  level: "info"
+  verbose: false
+  debug: false  # Set to true to see key selection details
+
+# Example environment variables to set:
+# export CEREBRAS_API_KEY_1="csk-primary-xxxxxxxxxxxxxxxxx"
+# export CEREBRAS_API_KEY_2="csk-secondary-xxxxxxxxxxxxxxx"
+# export CEREBRAS_API_KEY_3="csk-tertiary-xxxxxxxxxxxxxxxx"
+# export OPENROUTER_API_KEY_1="sk-or-v1-primary-xxxxxxxxxxx"
+# export OPENROUTER_API_KEY_2="sk-or-v1-secondary-xxxxxxxxx"
+# export OPENAI_API_KEY="sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx"
+# export ANTHROPIC_KEY_1="sk-ant-primary-xxxxxxxxxxxx"
+# export ANTHROPIC_KEY_2="sk-ant-secondary-xxxxxxxxxx"
+# export GEMINI_API_KEY="AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# How multiple keys work:
+# 1. Round-robin load balancing: Requests distributed evenly across all keys
+# 2. Automatic failover: If one key fails, automatically try the next
+# 3. Health tracking: Failed keys go into exponential backoff (1s, 2s, 4s, 8s... max 60s)
+# 4. Auto-recovery: Keys recover automatically after backoff period
+# 5. Monitoring: Detailed logs show which key is being used and health status
+
+# Example output:
+# INFO: APIKeyManager initialized for Cerebras with 3 key(s)
+# DEBUG: Cerebras: Selected key #1/3
+# DEBUG: Cerebras: API key succeeded (healthy)
+# WARN: Cerebras: API key failure 1 (backoff: 1s)  <- Temporary failure
+# INFO: Cerebras: Request succeeded on attempt 2/3 (failover successful)
