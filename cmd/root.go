@@ -18,22 +18,23 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "mcp-code-api",
-	Short: "Cerebras Code MCP Server - Go Implementation",
-	Long: `Cerebras Code MCP Server v` + version + ` - Go Implementation
+	Short: "MCP Code API - Multi-Provider Code Generation Server",
+	Long: `MCP Code API v` + version + ` - Multi-Provider Code Generation Server
 
-This MCP server is designed for planning with Claude Code, Cline, or Cursor
-and making changes with Cerebras to maximize speed and intelligence while
-avoiding API limits. Use your preferred AI for planning and strategy, then
-leverage Cerebras for high-quality code generation.
+A high-performance Model Context Protocol (MCP) server supporting multiple AI
+providers (Cerebras, OpenRouter, OpenAI, Anthropic, Gemini, and more). Designed
+for planning with Claude Code, Cline, or Cursor while leveraging fast providers
+like Cerebras for code generation to maximize speed and avoid API limits.
 
 Features:
-- Project restructure with better DX
+- Multi-provider support with smart routing and fallback
 - Enhanced visual diffs for Claude Code
-- VS Code support with install/remove functionality
+- IDE support for Claude Code, Cursor, Cline, VS Code
 - Interactive configuration wizard
-- Automatic fallback between providers
+- OAuth authentication (in development)
+- Load balancing across multiple API keys
 
-This is the Go implementation offering improved performance and easier deployment.`,
+Built with Go for maximum performance and reliability.`,
 	Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 }
 

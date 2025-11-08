@@ -45,8 +45,8 @@ func (w *RemovalWizard) promptYesNo(prompt string, defaultValue bool) bool {
 
 // Run executes the removal wizard
 func (w *RemovalWizard) Run() error {
-	fmt.Println("\n🧹 Cerebras MCP Configuration Cleanup")
-	fmt.Println("=================================")
+	fmt.Println("\n🧹 MCP Code API Configuration Cleanup")
+	fmt.Println("======================================")
 
 	// Check what configurations exist
 	configs := w.findExistingConfigs()

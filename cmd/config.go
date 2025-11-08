@@ -27,11 +27,11 @@ Supported IDEs:
 - Cline
 - VS Code (Copilot)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("🧙 Cerebras MCP Configuration Wizard")
-		fmt.Println("====================================")
+		fmt.Println("🧙 MCP Code API Configuration Wizard")
+		fmt.Println("=====================================")
 		fmt.Println()
 		fmt.Println("This wizard will help you configure:")
-		fmt.Println("  • API keys for Cerebras and OpenRouter")
+		fmt.Println("  • API keys for multiple providers")
 		fmt.Println("  • IDE integrations")
 		fmt.Println("  • Automatic fallback settings")
 		fmt.Println("  • Testing and validation")

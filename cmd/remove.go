@@ -21,8 +21,8 @@ This wizard will:
 - Provide options for selective removal
 - Verify cleanup completion`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("🧹 Cerebras MCP Cleanup Wizard")
-		fmt.Println("==============================")
+		fmt.Println("🧹 MCP Code API Cleanup Wizard")
+		fmt.Println("===============================")
 		fmt.Println()
 		fmt.Println("This wizard will help you:")
 		fmt.Println("  • Remove IDE configurations")

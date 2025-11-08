@@ -43,7 +43,7 @@ The server will:
 		}
 
 		logger.Info("=== SERVER STARTUP ===")
-		logger.Info("Cerebras Code MCP Server (Go) starting...")
+		logger.Info("MCP Code API server starting...")
 		logger.Infof("Log file location: %s", logFile)
 
 		// Load configuration

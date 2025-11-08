@@ -31,8 +31,8 @@ func Run() error {
 
 // run executes the wizard flow
 func (w *Wizard) run() error {
-	fmt.Println("\nLet's configure your Cerebras MCP Server!")
-	fmt.Println("======================================")
+	fmt.Println("\nLet's configure your MCP Code API server!")
+	fmt.Println("==========================================")
 
 	// Step 1: Configure Cerebras API
 	if err := w.configureCerebrasAPI(); err != nil {
@@ -125,7 +125,7 @@ func (w *Wizard) configureOpenRouterAPI() error {
 			}
 
 			// Ask about site name
-			siteName := w.prompt("Site name (default: Cerebras MCP): ", true)
+			siteName := w.prompt("Site name (default: MCP Code API): ", true)
 			if siteName != "" {
 				os.Setenv("OPENROUTER_SITE_NAME", siteName)
 			}

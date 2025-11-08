@@ -239,7 +239,7 @@ func Load() *Config {
 	// OpenRouter defaults (legacy support)
 	viper.SetDefault("providers.openrouter.api_key", "")
 	viper.SetDefault("providers.openrouter.site_url", "https://github.com/cerebras/cerebras-code-mcp")
-	viper.SetDefault("providers.openrouter.site_name", "Cerebras MCP")
+	viper.SetDefault("providers.openrouter.site_name", "MCP Code API")
 	viper.SetDefault("providers.openrouter.base_url", "https://openrouter.ai/api")
 	viper.SetDefault("providers.openrouter.model", "qwen/qwen3-coder")
 

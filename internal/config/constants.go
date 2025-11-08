@@ -111,7 +111,7 @@ const (
 	ClaudeConfigTemplate = `cerebras_mcp:
   command: mcp-code-api
   args: ["server"]
-  description: "Cerebras Code MCP Server for high-quality code generation"
+  description: "MCP Code API - Multi-provider code generation server"
   env:
     CEREBRAS_MCP_IDE: "claude-code"`
 )
