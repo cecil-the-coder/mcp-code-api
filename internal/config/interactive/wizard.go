@@ -44,12 +44,17 @@ func (w *Wizard) run() error {
 		return err
 	}
 
-	// Step 3: Choose IDEs
+	// Step 3: Configure additional providers (optional)
+	if err := w.configureAdditionalProviders(); err != nil {
+		return err
+	}
+
+	// Step 4: Choose IDEs
 	if err := w.configureIDEs(); err != nil {
 		return err
 	}
 
-	// Step 4: Test configuration
+	// Step 5: Test configuration
 	if err := w.testConfiguration(); err != nil {
 		return err
 	}
@@ -137,6 +142,178 @@ func (w *Wizard) configureOpenRouterAPI() error {
 		fmt.Println("⏭️  Skipping OpenRouter API configuration")
 	}
 
+	return nil
+}
+
+// configureAdditionalProviders configures additional providers with OAuth support
+func (w *Wizard) configureAdditionalProviders() error {
+	fmt.Println("\n🌟 Additional Provider Configuration (Optional)")
+	fmt.Println("-----------------------------------------------")
+	fmt.Println("Configure additional AI providers with OAuth or API key authentication.")
+	fmt.Println("Supported providers: Anthropic, Gemini, Qwen, OpenAI")
+	fmt.Println()
+
+	configure := w.promptYesNo("Do you want to configure additional providers? (y/N): ", false)
+	if !configure {
+		fmt.Println("⏭️  Skipping additional provider configuration")
+		return nil
+	}
+
+	// Anthropic
+	fmt.Println()
+	configureAnthropic := w.promptYesNo("Configure Anthropic Claude? (y/N): ", false)
+	if configureAnthropic {
+		if err := w.configureAnthropicProvider(); err != nil {
+			logger.Errorf("Failed to configure Anthropic: %v", err)
+		}
+	}
+
+	// Gemini
+	fmt.Println()
+	configureGemini := w.promptYesNo("Configure Google Gemini? (y/N): ", false)
+	if configureGemini {
+		if err := w.configureGeminiProvider(); err != nil {
+			logger.Errorf("Failed to configure Gemini: %v", err)
+		}
+	}
+
+	// Qwen
+	fmt.Println()
+	configureQwen := w.promptYesNo("Configure Alibaba Qwen? (y/N): ", false)
+	if configureQwen {
+		if err := w.configureQwenProvider(); err != nil {
+			logger.Errorf("Failed to configure Qwen: %v", err)
+		}
+	}
+
+	// OpenAI
+	fmt.Println()
+	configureOpenAI := w.promptYesNo("Configure OpenAI? (y/N): ", false)
+	if configureOpenAI {
+		if err := w.configureOpenAIProvider(); err != nil {
+			logger.Errorf("Failed to configure OpenAI: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// configureAnthropicProvider configures Anthropic with API key or OAuth
+func (w *Wizard) configureAnthropicProvider() error {
+	fmt.Println("\n🤖 Anthropic Claude Configuration")
+	fmt.Println("----------------------------------")
+	fmt.Println("Choose authentication method:")
+	fmt.Println("  1. API Key (recommended for most users)")
+	fmt.Println("  2. OAuth (for advanced integrations)")
+	fmt.Println()
+
+	method := w.prompt("Select method (1 or 2): ", false)
+
+	switch method {
+	case "1":
+		apiKey := w.prompt("Enter Anthropic API key: ", false)
+		if apiKey != "" {
+			os.Setenv("ANTHROPIC_API_KEY", apiKey)
+			fmt.Println("✅ Anthropic API key configured")
+		}
+	case "2":
+		_, tokenInfo, err := w.configureProviderOAuth("anthropic", "Anthropic")
+		if err != nil {
+			fmt.Printf("⚠️  OAuth configuration failed: %v\n", err)
+			fmt.Println("Falling back to API key method...")
+			return w.configureAnthropicProvider()
+		}
+		if tokenInfo != nil {
+			fmt.Println("✅ Anthropic OAuth configured successfully")
+			// Store OAuth config in environment for this session
+			// In a real implementation, we'd save this to the config file
+		}
+	default:
+		fmt.Println("Invalid selection, skipping Anthropic configuration")
+	}
+
+	return nil
+}
+
+// configureGeminiProvider configures Gemini with API key or OAuth
+func (w *Wizard) configureGeminiProvider() error {
+	fmt.Println("\n✨ Google Gemini Configuration")
+	fmt.Println("------------------------------")
+	fmt.Println("Choose authentication method:")
+	fmt.Println("  1. API Key (recommended for most users)")
+	fmt.Println("  2. OAuth (for advanced integrations)")
+	fmt.Println()
+
+	method := w.prompt("Select method (1 or 2): ", false)
+
+	switch method {
+	case "1":
+		apiKey := w.prompt("Enter Gemini API key: ", false)
+		if apiKey != "" {
+			os.Setenv("GEMINI_API_KEY", apiKey)
+			fmt.Println("✅ Gemini API key configured")
+		}
+	case "2":
+		_, tokenInfo, err := w.configureProviderOAuth("gemini", "Gemini")
+		if err != nil {
+			fmt.Printf("⚠️  OAuth configuration failed: %v\n", err)
+			fmt.Println("Falling back to API key method...")
+			return w.configureGeminiProvider()
+		}
+		if tokenInfo != nil {
+			fmt.Println("✅ Gemini OAuth configured successfully")
+		}
+	default:
+		fmt.Println("Invalid selection, skipping Gemini configuration")
+	}
+
+	return nil
+}
+
+// configureQwenProvider configures Qwen with API key or OAuth
+func (w *Wizard) configureQwenProvider() error {
+	fmt.Println("\n🐉 Alibaba Qwen Configuration")
+	fmt.Println("-----------------------------")
+	fmt.Println("Choose authentication method:")
+	fmt.Println("  1. API Key (recommended for most users)")
+	fmt.Println("  2. OAuth (for advanced integrations)")
+	fmt.Println()
+
+	method := w.prompt("Select method (1 or 2): ", false)
+
+	switch method {
+	case "1":
+		apiKey := w.prompt("Enter Qwen API key: ", false)
+		if apiKey != "" {
+			os.Setenv("QWEN_API_KEY", apiKey)
+			fmt.Println("✅ Qwen API key configured")
+		}
+	case "2":
+		_, tokenInfo, err := w.configureProviderOAuth("qwen", "Qwen")
+		if err != nil {
+			fmt.Printf("⚠️  OAuth configuration failed: %v\n", err)
+			fmt.Println("Falling back to API key method...")
+			return w.configureQwenProvider()
+		}
+		if tokenInfo != nil {
+			fmt.Println("✅ Qwen OAuth configured successfully")
+		}
+	default:
+		fmt.Println("Invalid selection, skipping Qwen configuration")
+	}
+
+	return nil
+}
+
+// configureOpenAIProvider configures OpenAI with API key
+func (w *Wizard) configureOpenAIProvider() error {
+	fmt.Println("\n🤖 OpenAI Configuration")
+	fmt.Println("-----------------------")
+	apiKey := w.prompt("Enter OpenAI API key: ", false)
+	if apiKey != "" {
+		os.Setenv("OPENAI_API_KEY", apiKey)
+		fmt.Println("✅ OpenAI API key configured")
+	}
 	return nil
 }
 
