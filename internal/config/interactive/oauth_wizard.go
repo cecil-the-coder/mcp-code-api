@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cecil-the-coder/mcp-code-api/internal/api/auth"
-	"github.com/cecil-the-coder/mcp-code-api/internal/api/provider"
 	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
 	"github.com/cecil-the-coder/mcp-code-api/internal/oauth"
 )
@@ -41,7 +40,7 @@ func (w *Wizard) performOAuthFlow(providerName string, config ProviderOAuthConfi
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 
 	if err := server.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
@@ -190,28 +189,4 @@ func (w *Wizard) configureProviderOAuth(providerName, displayName string) (*Prov
 	}
 
 	return config, tokenInfo, nil
-}
-
-// getOAuthConfigForProvider returns OAuth config for a provider in the config format
-func getOAuthConfigForProvider(oauthConfig *ProviderOAuthConfig, tokenInfo *auth.TokenInfo) *provider.OAuthConfig {
-	if oauthConfig == nil {
-		return nil
-	}
-
-	providerConfig := &provider.OAuthConfig{
-		ClientID:     oauthConfig.ClientID,
-		ClientSecret: oauthConfig.ClientSecret,
-		RedirectURL:  "", // Will be set during flow
-		Scopes:       oauthConfig.Scopes,
-		AuthURL:      oauthConfig.AuthURL,
-		TokenURL:     oauthConfig.TokenURL,
-	}
-
-	if tokenInfo != nil {
-		providerConfig.AccessToken = tokenInfo.AccessToken
-		providerConfig.RefreshToken = tokenInfo.RefreshToken
-		providerConfig.ExpiresAt = tokenInfo.ExpiresAt
-	}
-
-	return providerConfig
 }

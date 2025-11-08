@@ -626,28 +626,6 @@ func (w *Wizard) prompt(prompt string, allowEmpty bool) string {
 	}
 }
 
-// promptYesNo prompts the user for a yes/no answer
-func (w *Wizard) promptYesNo(prompt string, defaultValue bool) bool {
-	for {
-		fmt.Print(prompt)
-		input, err := w.reader.ReadString('\n')
-		if err != nil {
-			// Handle EOF or other input errors gracefully - just return default
-			return defaultValue
-		}
-
-		input = strings.ToLower(strings.TrimSpace(input))
-		switch input {
-		case "y", "yes":
-			return true
-		case "n", "no", "":
-			return defaultValue
-		default:
-			fmt.Println("Please enter 'y' or 'n'.")
-		}
-	}
-}
-
 // saveConfiguration prompts for config file location and saves the configuration
 func (w *Wizard) saveConfiguration() (string, error) {
 	fmt.Println("\n💾 Save Configuration")

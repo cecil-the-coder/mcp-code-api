@@ -79,7 +79,7 @@ func (v *GoValidator) AutoFix(code string) (string, error) {
 
 	go func() {
 		defer stdin.Close()
-		stdin.Write([]byte(code))
+		_, _ = stdin.Write([]byte(code))
 	}()
 
 	output, err := cmd.CombinedOutput()
