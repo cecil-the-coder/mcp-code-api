@@ -24,7 +24,7 @@ type CallbackServer struct {
 	once     sync.Once
 }
 
-// NewCallbackServer creates a new OAuth callback server
+// NewCallbackServer creates a new OAuth callback server on a specific port
 func NewCallbackServer(port int) (*CallbackServer, error) {
 	addr := fmt.Sprintf("localhost:%d", port)
 	listener, err := net.Listen("tcp", addr)
@@ -48,6 +48,22 @@ func NewCallbackServer(port int) (*CallbackServer, error) {
 	}
 
 	return cs, nil
+}
+
+// NewCallbackServerWithPortRange creates a new OAuth callback server, trying ports in a range
+// This prevents failures when the default port is already in use
+func NewCallbackServerWithPortRange(startPort, endPort int) (*CallbackServer, error) {
+	var lastErr error
+
+	for port := startPort; port <= endPort; port++ {
+		server, err := NewCallbackServer(port)
+		if err == nil {
+			return server, nil
+		}
+		lastErr = err
+	}
+
+	return nil, fmt.Errorf("failed to find available port in range %d-%d: %w", startPort, endPort, lastErr)
 }
 
 // Start starts the callback server

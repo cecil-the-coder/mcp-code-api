@@ -21,7 +21,7 @@ providers:
 
     model: "zai-glm-4.6"
     max_tokens: 8000
-    temperature: 0.1
+    temperature: 0.6
     base_url: "https://api.cerebras.ai"
 
   # OpenRouter with multiple API keys
@@ -30,8 +30,8 @@ providers:
       - "${OPENROUTER_API_KEY_1}"
       - "${OPENROUTER_API_KEY_2}"
     model: "qwen/qwen3-coder"
-    site_url: "https://github.com/cerebras/cerebras-code-mcp"
-    site_name: "Cerebras MCP"
+    site_url: "https://github.com/cecil-the-coder/mcp-code-api"
+    site_name: "MCP Code API"
     base_url: "https://openrouter.ai/api"
 
   # OpenAI with single key (backward compatible)
@@ -48,6 +48,30 @@ providers:
       - "${ANTHROPIC_KEY_2}"
     model: "claude-3-5-sonnet-20241022"
     base_url: "https://api.anthropic.com"
+
+  # --- API-Compatible Providers Examples (Commented Out) ---
+
+  # Z.ai (Anthropic-compatible with GLM-4.6 coding model)
+  # Uncomment to use z.ai instead of standard Anthropic
+  # anthropic:
+  #   api_key: "${ZAI_API_KEY}"  # or use ANTHROPIC_AUTH_TOKEN env var
+  #   base_url: "https://api.z.ai/api/anthropic"
+  #   model: "glm-4.6"  # Z.ai's GLM-4.6 (200K context, optimized for coding)
+  #   # Alternative: model: "glm-4.5-air"  # Lighter/faster variant
+
+  # LM Studio (OpenAI-compatible local server)
+  # Uncomment to use LM Studio for local development
+  # openai:
+  #   api_key: "lm-studio"  # Can be any value
+  #   base_url: "http://localhost:1234/v1"
+  #   model: "local-model"  # Your loaded model name
+
+  # Ollama (OpenAI-compatible local server)
+  # Uncomment to use Ollama
+  # openai:
+  #   api_key: "ollama"  # Can be any value
+  #   base_url: "http://localhost:11434/v1"
+  #   model: "codellama"  # Or any Ollama model
 
   # Gemini with single key
   gemini:
@@ -85,6 +109,15 @@ logging:
 # export ANTHROPIC_KEY_1="sk-ant-primary-xxxxxxxxxxxx"
 # export ANTHROPIC_KEY_2="sk-ant-secondary-xxxxxxxxxx"
 # export GEMINI_API_KEY="AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Custom base URL environment variables (for API-compatible providers):
+# export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"  # For z.ai
+# export ANTHROPIC_AUTH_TOKEN="your-zai-token"  # Alternative to ANTHROPIC_API_KEY
+# export OPENAI_BASE_URL="http://localhost:1234/v1"  # For LM Studio/Ollama
+# export CEREBRAS_BASE_URL="https://custom-endpoint.com"
+# export OPENROUTER_BASE_URL="https://custom-endpoint.com"
+# export GEMINI_BASE_URL="https://custom-endpoint.com"
+# export QWEN_BASE_URL="https://custom-endpoint.com"
 
 # How multiple keys work:
 # 1. Round-robin load balancing: Requests distributed evenly across all keys

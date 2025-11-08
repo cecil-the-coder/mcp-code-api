@@ -27,7 +27,6 @@ The Go implementation offers significant advantages over the Node.js version:
 - 📁 **Context-Aware Processing** with multiple file support
 - 💻 **Multi-IDE Support** - Claude Code, Cursor, Cline, VS Code
 - ⚙️ **Interactive Configuration Wizard** for easy setup
-- 🧹 **Cleanup Wizard** for complete removal
 - 📝 **Comprehensive Logging** with debug support
 
 ## 📋 System Requirements
@@ -89,7 +88,7 @@ export CEREBRAS_API_KEY="your_cerebras_api_key"
 export OPENROUTER_API_KEY="your_openrouter_api_key"
 
 # Set model preferences (optional)
-export CEREBRAS_MODEL="qwen-3-coder-480b"
+export CEREBRAS_MODEL="zai-glm-4.6"
 export OPENROUTER_MODEL="qwen/qwen3-coder"
 ```
 
@@ -181,20 +180,6 @@ The Go implementation includes an enhanced auto-instruction system that:
 - Provides clear instructions to AI models
 - Ensures consistent behavior across all IDEs
 
-## 🧹 Cleanup
-
-To remove all configurations:
-
-```bash
-mcp-code-api remove
-```
-
-The cleanup wizard will:
-- Scan for existing configurations
-- Remove IDE-specific files
-- Clean up MCP server settings
-- Verify completion
-
 ## 🏗️ Development
 
 ### Building
@@ -249,8 +234,7 @@ mcp-code-api/
 ├── 📁 cmd/                 # CLI commands
 │   ├── 📜 root.go          # Root command
 │   ├── 📜 server.go        # Server command
-│   ├── 📜 config.go        # Configuration command
-│   └── 📜 remove.go        # Removal command
+│   └── 📜 config.go        # Configuration command
 ├── 📁 internal/            # Internal packages
 │   ├── 📁 api/             # API integrations
 │   │   ├── 📜 router.go    # API router
@@ -282,8 +266,8 @@ mcp-code-api/
 ```bash
 # Cerebras Configuration
 CEREBRAS_API_KEY=your_key
-CEREBRAS_MODEL=qwen-3-coder-480b
-CEREBRAS_TEMPERATURE=0.1
+CEREBRAS_MODEL=zai-glm-4.6
+CEREBRAS_TEMPERATURE=0.6
 CEREBRAS_MAX_TOKENS=4096
 
 # OpenRouter Configuration
@@ -301,13 +285,13 @@ CEREBRAS_MCP_VERBOSE=false
 
 ### Configuration File
 
-You can also use a YAML configuration file at `~/.cerebras-mcp.yaml`:
+You can also use a YAML configuration file at `~/.mcp-code-api/config.yaml`:
 
 ```yaml
 cerebras:
   api_key: "your_key"
-  model: "qwen-3-coder-480b"
-  temperature: 0.1
+  model: "zai-glm-4.6"
+  temperature: 0.6
   max_tokens: 4096
 
 openrouter:
@@ -337,7 +321,7 @@ providers:
       - "${CEREBRAS_API_KEY_1}"
       - "${CEREBRAS_API_KEY_2}"
       - "${CEREBRAS_API_KEY_3}"
-    model: "qwen-3-coder-480b"
+    model: "zai-glm-4.6"
 
   openrouter:
     # Single key - backward compatible
@@ -379,6 +363,144 @@ mcp-code-api server
 ```
 
 For a complete example configuration, see [config.example.yaml](config.example.yaml).
+
+## 🔌 Using API-Compatible Providers
+
+The server supports **API-compatible providers** - third-party services that implement the same API format as the major providers. This includes:
+
+- **Anthropic-compatible** (e.g., z.ai with GLM-4.6, local proxies)
+- **OpenAI-compatible** (e.g., LM Studio, Ollama, LocalAI)
+- **Custom self-hosted endpoints**
+
+### Anthropic-Compatible Providers (z.ai)
+
+The MCP Code API supports any provider that implements the Anthropic Messages API format.
+
+#### Configuration File Method
+
+Add to your `~/.mcp-code-api/config.yaml`:
+
+```yaml
+providers:
+  anthropic:
+    # z.ai's authentication token
+    api_key: "your-zai-api-key"
+    # z.ai's Anthropic-compatible endpoint
+    base_url: "https://api.z.ai/api/anthropic"
+    # Use Z.ai's GLM-4.6 model (200K context, optimized for coding)
+    model: "glm-4.6"
+
+  enabled:
+    - anthropic
+
+  preferred_order:
+    - anthropic
+```
+
+**Available Z.ai Models:**
+- `glm-4.6` - Latest flagship model (200K context, best for coding/reasoning)
+- `glm-4.5-air` - Lighter/faster variant for quick tasks
+
+#### Environment Variables Method
+
+```bash
+# z.ai example
+export ANTHROPIC_AUTH_TOKEN="your-zai-api-key"
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+
+# Start the server
+./mcp-code-api server
+```
+
+**Note**: Both `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` environment variables are supported.
+
+#### Multiple Anthropic Providers (Advanced)
+
+If you want to use both standard Anthropic AND a compatible provider:
+
+```yaml
+providers:
+  # Standard Anthropic
+  anthropic:
+    api_key: "sk-ant-..."
+    base_url: "https://api.anthropic.com"
+    model: "claude-3-5-sonnet-20241022"
+
+  # Custom provider: z.ai
+  custom:
+    zai:
+      type: "anthropic"
+      name: "Z.ai"
+      api_key: "your-zai-api-key"
+      base_url: "https://api.z.ai/api/anthropic"
+      default_model: "glm-4.6"
+      supports_streaming: true
+      supports_tool_calling: true
+      tool_format: "anthropic"
+
+  enabled:
+    - anthropic
+    - zai
+
+  preferred_order:
+    - zai         # Try z.ai first
+    - anthropic   # Fall back to official Anthropic
+```
+
+### OpenAI-Compatible Providers (LM Studio, Ollama)
+
+```yaml
+providers:
+  openai:
+    api_key: "lm-studio"  # Can be any value for LM Studio
+    base_url: "http://localhost:1234/v1"
+    model: "local-model"
+```
+
+Or using environment variables:
+
+```bash
+export OPENAI_API_KEY="lm-studio"
+export OPENAI_BASE_URL="http://localhost:1234/v1"
+```
+
+### Supported Environment Variables
+
+All providers now support custom base URLs via environment variables:
+
+| Provider   | API Key Env Var(s)                    | Base URL Env Var       |
+|-----------|---------------------------------------|------------------------|
+| Anthropic | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | `ANTHROPIC_BASE_URL` |
+| OpenAI    | `OPENAI_API_KEY`                      | `OPENAI_BASE_URL`     |
+| Gemini    | `GEMINI_API_KEY`                      | `GEMINI_BASE_URL`     |
+| Qwen      | `QWEN_API_KEY`                        | `QWEN_BASE_URL`       |
+| Cerebras  | `CEREBRAS_API_KEY`                    | `CEREBRAS_BASE_URL`   |
+| OpenRouter| `OPENROUTER_API_KEY`                  | `OPENROUTER_BASE_URL` |
+
+**Examples:**
+
+```bash
+# Use an OpenAI-compatible endpoint (like LM Studio)
+export OPENAI_API_KEY="lm-studio-key"
+export OPENAI_BASE_URL="http://localhost:1234/v1"
+
+# Use a custom Anthropic-compatible endpoint (z.ai)
+export ANTHROPIC_AUTH_TOKEN="your-token"
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+```
+
+### Troubleshooting
+
+**Authentication fails:**
+- Verify your token/API key is correct
+- Check if the base URL includes the correct API version path
+- Some providers require specific headers - check their documentation
+
+**Different API format:**
+If the provider uses a slightly different format, you may need to create a custom provider adapter.
+
+**Rate limiting:**
+Some compatible providers have different rate limits than the official APIs. Adjust your usage accordingly.
 
 ## 🤝 Contributing
 

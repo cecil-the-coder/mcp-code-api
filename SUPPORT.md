@@ -1,10 +1,10 @@
-# Support for Cerebras MCP
+# Support for MCP Code API
 
-Thank you for using the Cerebras MCP (Model Context Protocol) server! We're here to help you with any questions or issues you might have.
+Thank you for using the MCP Code API (Model Context Protocol) server! We're here to help you with any questions or issues you might have.
 
 ## Getting Help
 
-If you need help with the Cerebras MCP server, here are the best ways to get support:
+If you need help with the MCP Code API server, here are the best ways to get support:
 
 ### Discord Community
 
@@ -27,7 +27,7 @@ Check our documentation for detailed information about using the MCP server:
 
 ### GitHub Issues
 
-For bugs, feature requests, or other issues, please file them in our [GitHub issues](https://github.com/cerebras/cerebras-code-mcp/issues) tracker.
+For bugs, feature requests, or other issues, please file them in our [GitHub issues](https://github.com/cecil-the-coder/mcp-code-api/issues) tracker.
 
 When filing an issue, please include:
 - A clear description of the problem
@@ -46,11 +46,11 @@ When filing an issue, please include:
 3. Navigate to the API keys section
 4. Generate a new API key
 5. Copy the key (it should start with `csk-`)
-6. Use it in the interactive setup: `cerebras-mcp --config`
+6. Use it in the interactive setup: `mcp-code-api config`
 
 ### What IDEs are supported?
 
-The Cerebras MCP server supports:
+The MCP Code API server supports:
 
 **Fully Supported IDEs:**
 - **Claude Code** - Native MCP integration
@@ -60,9 +60,8 @@ The Cerebras MCP server supports:
 - **Crush** - Terminal AI with MCP configuration
 
 **Setup Methods:**
-- Interactive setup wizard: `cerebras-mcp --config`
+- Interactive setup wizard: `mcp-code-api config`
 - Manual configuration (see README.md)
-- Removal wizard: `cerebras-mcp --remove`
 
 ### What models are supported?
 
@@ -85,7 +84,7 @@ If you're experiencing issues, check:
 1. **API Key Configuration:**
    - Ensure your API key is set: `echo $CEREBRAS_API_KEY`
    - Verify the key format (should start with `csk-`)
-   - Re-run setup if needed: `cerebras-mcp --config`
+   - Re-run setup if needed: `mcp-code-api config`
 
 2. **IDE Configuration:**
    - Check that MCP server is properly configured in your IDE
@@ -93,7 +92,7 @@ If you're experiencing issues, check:
    - Restart your IDE after configuration changes
 
 3. **Server Status:**
-   - Test the server directly: `CEREBRAS_API_KEY=your_key cerebras-mcp`
+   - Test the server directly: `CEREBRAS_API_KEY=your_key mcp-code-api server`
    - Check for error messages in the console
    - Ensure Node.js version is 18 or higher
 
@@ -107,44 +106,40 @@ If you're experiencing issues, check:
 To update to the latest version:
 
 ```bash
-npm update -g cerebras-code-mcp
+npm update -g mcp-code-api
 ```
 
 Or reinstall completely:
 
 ```bash
-npm uninstall -g cerebras-code-mcp
-npm install -g cerebras-code-mcp
+npm uninstall -g mcp-code-api
+npm install -g mcp-code-api
 ```
 
 After updating:
 1. Restart your IDE
-2. Verify the new version: `cerebras-mcp --version`
-3. Re-run configuration if needed: `cerebras-mcp --config`
+2. Verify the new version: `mcp-code-api --version`
+3. Re-run configuration if needed: `mcp-code-api config`
 
 ### How do I switch between IDEs?
 
 To use the MCP server with a different IDE:
 
-1. **Remove current setup:**
+1. **Set up new IDE:**
    ```bash
-   cerebras-mcp --remove
+   mcp-code-api config
    ```
 
-2. **Set up new IDE:**
-   ```bash
-   cerebras-mcp --config
-   ```
-
-3. **Or configure multiple IDEs:**
+2. **Configure multiple IDEs:**
    - You can have the server configured for multiple IDEs simultaneously
    - Each IDE will use its own configuration files
+   - Run the config wizard to add support for additional IDEs
 
 ## Contact Information
 
 For additional support, you can reach out through:
 - **Discord**: https://discord.gg/fQwFthdrq2
-- **GitHub Issues**: https://github.com/cerebras/cerebras-code-mcp/issues
+- **GitHub Issues**: https://github.com/cecil-the-coder/mcp-code-api/issues
 - **Email**: support@cerebras.ai (for security issues)
 
 ## Security Issues
@@ -161,14 +156,14 @@ We value your feedback and suggestions for improving the MCP server. Please shar
 
 ## Troubleshooting Common Issues
 
-### "Command not found: cerebras-mcp"
+### "Command not found: mcp-code-api"
 ```bash
-npm install -g cerebras-code-mcp
+npm install -g mcp-code-api
 ```
 
 ### "Permission denied" errors
 ```bash
-sudo npm install -g cerebras-code-mcp
+sudo npm install -g mcp-code-api
 ```
 
 ### MCP server not responding

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cecil-the-coder/mcp-code-api/internal/api"
 	"github.com/cecil-the-coder/mcp-code-api/internal/formatting"
 	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
 	"github.com/cecil-the-coder/mcp-code-api/internal/utils"
+	"github.com/cecil-the-coder/mcp-code-api/internal/validation"
 )
 
 // handleWriteTool handles the write tool request
@@ -43,6 +45,18 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 		return nil, fmt.Errorf("context_files must be an array of strings: %w", err)
 	}
 
+	// Check for write_only flag to reduce context usage
+	writeOnly := extractBoolArg(arguments, "write_only")
+
+	// Check for validate flag - defaults to true if write_only is true
+	validate := extractBoolArg(arguments, "validate")
+	if !validate && writeOnly {
+		// If validate wasn't explicitly set and write_only is true, enable validation
+		if _, exists := (*arguments)["validate"]; !exists {
+			validate = true
+		}
+	}
+
 	// Check if file exists to determine operation type
 	existingContent, err := utils.ReadFileContent(filePath)
 	isEdit := err == nil && existingContent != ""
@@ -62,12 +76,94 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 	// Clean the AI response to remove markdown formatting
 	cleanResult := utils.CleanCodeResponse(result)
 
+	// Validate code syntax if requested
+	if validate {
+		language := validation.DetectLanguage(filePath)
+
+		logger.Debug("=== VALIDATION DEBUG ===")
+		logger.Debugf("Language detected: %s", language)
+		logger.Debugf("Validation enabled: %v", validate)
+		logger.Debug("========================")
+
+		if language != validation.LanguageUnknown {
+			validator := language.GetValidator()
+			validationResult, err := validator.Validate(cleanResult, filePath)
+			if err != nil {
+				logger.Debugf("Validation error: %v", err)
+				return s.createErrorResponse(fmt.Errorf("validation error: %w", err))
+			}
+
+			if !validationResult.Valid {
+				logger.Debugf("Validation failed with %d errors", len(validationResult.Errors))
+
+				// Try auto-fix if available
+				if validator.CanAutoFix() {
+					logger.Debug("Attempting auto-fix...")
+					fixedCode, err := validator.AutoFix(cleanResult)
+					if err == nil {
+						logger.Debug("Auto-fix successful")
+						cleanResult = fixedCode
+
+						// Validate the fixed code
+						validationResult, err = validator.Validate(cleanResult, filePath)
+						if err != nil || !validationResult.Valid {
+							logger.Debug("Auto-fix validation failed")
+							errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
+							return s.createValidationErrorResponse(errorMsg)
+						}
+					} else {
+						logger.Debugf("Auto-fix failed: %v", err)
+						errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
+						return s.createValidationErrorResponse(errorMsg)
+					}
+				} else {
+					// No auto-fix available, return error to AI
+					errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
+					return s.createValidationErrorResponse(errorMsg)
+				}
+			} else {
+				logger.Debug("Validation passed")
+			}
+		} else {
+			logger.Debug("Validation skipped for unknown language")
+		}
+	}
+
 	// Write the cleaned result to the file
 	if err := utils.WriteFileContent(filePath, cleanResult); err != nil {
 		return s.createErrorResponse(fmt.Errorf("failed to write file: %w", err))
 	}
 
-	// Format the response based on operation type
+	// If write_only is enabled, return minimal response to save context
+	if writeOnly {
+		fileName := filepath.Base(filePath)
+		operation := "created"
+		if isEdit {
+			operation = "updated"
+		}
+
+		lineCount := strings.Count(cleanResult, "\n") + 1
+		responseContent := []Content{{
+			Type: "text",
+			Text: fmt.Sprintf("✅ Successfully %s: %s\n📝 File: %s\n💾 Lines: %d\n\n(Full diff omitted to save context - use write_only: false to see changes)",
+				operation, fileName, filePath, lineCount),
+		}}
+
+		logger.Debug("=== MCP RESPONSE DEBUG (WRITE_ONLY MODE) ===")
+		logger.Debugf("IDE Source: %s", ideSource)
+		logger.Debug("Response type: Minimal success message")
+		logger.Debugf("Operation: %s", operation)
+		logger.Debug("===========================================")
+
+		return &Response{
+			JSONRPC: "2.0",
+			Result: map[string]interface{}{
+				"content": responseContent,
+			},
+		}, nil
+	}
+
+	// Format the response based on operation type (normal mode with full diff)
 	var responseContent []Content
 	fileName := filepath.Base(filePath)
 
@@ -152,6 +248,25 @@ func extractStringSliceArg(arguments *map[string]interface{}, key string) ([]str
 	}
 }
 
+// extractBoolArg extracts a boolean argument from the arguments map
+func extractBoolArg(arguments *map[string]interface{}, key string) bool {
+	if arguments == nil {
+		return false
+	}
+
+	value, exists := (*arguments)[key]
+	if !exists {
+		return false
+	}
+
+	boolValue, ok := value.(bool)
+	if !ok {
+		return false
+	}
+
+	return boolValue
+}
+
 // createErrorResponse creates an error response
 func (s *Server) createErrorResponse(err error) (*Response, error) {
 	// Get IDE identification from environment variable (in case of error)
@@ -172,6 +287,30 @@ func (s *Server) createErrorResponse(err error) (*Response, error) {
 			"content": []Content{{
 				Type: "text",
 				Text: fmt.Sprintf("Error in mcp-code-api server: %v", err),
+			}},
+		},
+	}, nil
+}
+
+// createValidationErrorResponse creates a validation error response
+func (s *Server) createValidationErrorResponse(errorMsg string) (*Response, error) {
+	ideSource := os.Getenv("CEREBRAS_MCP_IDE")
+	if ideSource == "" {
+		ideSource = "unknown"
+	}
+
+	logger.Debug("=== VALIDATION ERROR DEBUG ===")
+	logger.Debugf("IDE Source: %s", ideSource)
+	logger.Debugf("Validation failed: %s", errorMsg)
+	logger.Debug("==============================")
+
+	// Return validation error to AI so it can fix the code
+	return &Response{
+		JSONRPC: "2.0",
+		Result: map[string]interface{}{
+			"content": []Content{{
+				Type: "text",
+				Text: errorMsg,
 			}},
 		},
 	}, nil

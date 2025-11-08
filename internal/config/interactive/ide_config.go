@@ -131,7 +131,7 @@ func configureVSCode() error {
 			return fmt.Errorf("failed to parse existing extensions file: %w", err)
 		}
 		extensions["mcpServers"] = map[string]interface{}{
-			"cerebras-mcp": map[string]interface{}{
+			"mcp-code-api": map[string]interface{}{
 				"command": "mcp-code-api",
 				"args":    []string{"server"},
 			},

@@ -84,8 +84,8 @@ func (p *OpenRouterProvider) GenerateChatCompletion(
 	p.LogRequest("POST", config.BaseURL, map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": "Bearer " + config.APIKey,
-		"HTTP-Referer":  "https://github.com/cerebras/cerebras-code-mcp",
-		"X-Title":       "Cerebras MCP",
+		"HTTP-Referer":  "https://github.com/cecil-the-coder/mcp-code-api",
+		"X-Title":       "MCP Code API",
 	}, options)
 
 	// Use legacy client

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,19 +33,38 @@ type Config struct {
 	Logging   LoggingConfig             `yaml:"logging"`
 }
 
+// OAuthConfig holds OAuth authentication configuration
+type OAuthConfig struct {
+	AccessToken  string `yaml:"access_token" json:"access_token"`
+	RefreshToken string `yaml:"refresh_token" json:"refresh_token"`
+	ExpiresAt    string `yaml:"expires_at" json:"expires_at"`
+	TokenType    string `yaml:"token_type" json:"token_type"`
+}
+
 // ProviderConfig holds configuration for a single provider
 type ProviderConfig struct {
-	Name        string   `yaml:"name" json:"name"`
-	APIKey      string   `yaml:"api_key" json:"api_key"`
-	APIKeys     []string `yaml:"api_keys,omitempty" json:"api_keys,omitempty"` // Multiple API keys for load balancing
-	Models      []string `yaml:"models" json:"models"`
-	BaseURL     string   `yaml:"base_url,omitempty" json:"base_url,omitempty"`
-	Temperature float64  `yaml:"temperature" json:"temperature"`
-	MaxTokens   int      `yaml:"max_tokens" json:"max_tokens"`
-	SiteURL     string   `yaml:"site_url,omitempty" json:"site_url,omitempty"`
-	SiteName    string   `yaml:"site_name,omitempty" json:"site_name,omitempty"`
-	IsLocal     bool     `yaml:"-" json:"is_local"`
-	Enabled     bool     `yaml:"-" json:"enabled"`
+	Name        string       `yaml:"name" json:"name"`
+	DisplayName string       `yaml:"display_name,omitempty" json:"display_name,omitempty"` // Optional display name (defaults to Name)
+	APIKey      string       `yaml:"api_key" json:"api_key"`
+	APIKeys     []string     `yaml:"api_keys,omitempty" json:"api_keys,omitempty"` // Multiple API keys for load balancing
+	OAuth       *OAuthConfig `yaml:"oauth,omitempty" json:"oauth,omitempty"`        // OAuth authentication
+	Models      []string     `yaml:"models,omitempty" json:"models,omitempty"`      // Multiple models
+	BaseURL     string       `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	Temperature float64      `yaml:"temperature" json:"temperature"`
+	MaxTokens   int          `yaml:"max_tokens" json:"max_tokens"`
+	SiteURL     string       `yaml:"site_url,omitempty" json:"site_url,omitempty"`
+	SiteName    string       `yaml:"site_name,omitempty" json:"site_name,omitempty"`
+	Concurrency int          `yaml:"concurrency,omitempty" json:"concurrency,omitempty"` // Max concurrent model tests (default: 1)
+	IsLocal     bool         `yaml:"-" json:"is_local"`
+	Enabled     bool         `yaml:"-" json:"enabled"`
+}
+
+// GetDisplayName returns the display name if set, otherwise returns the provider name
+func (p *ProviderConfig) GetDisplayName() string {
+	if p.DisplayName != "" {
+		return p.DisplayName
+	}
+	return p.Name
 }
 
 // ServerConfig holds server configuration
@@ -73,6 +93,7 @@ type ModelTestResult struct {
 	ResponseTime  time.Duration `json:"response_time"`
 	WriteTime     time.Duration `json:"write_time"`
 	InitTime      time.Duration `json:"init_time"`
+	TTFT          time.Duration `json:"ttft"` // Time To First Token
 	Error         string        `json:"error,omitempty"`
 	ModelInfo     interface{}   `json:"model_info,omitempty"`
 	Skipped       bool          `json:"skipped"`
@@ -105,7 +126,7 @@ type MCPError struct {
 
 // Command-line flags
 var (
-	configFile    = flag.String("config", "test-config.yaml", "Configuration file path")
+	configFile    = flag.String("config", "~/.mcp-code-api/config.yaml", "Configuration file path")
 	verboseOutput = flag.Bool("verbose", false, "Show verbose test output")
 	showHelp      = flag.Bool("help", false, "Show usage information")
 )
@@ -152,6 +173,16 @@ func loadConfig(configPath string) (*Config, error) {
 		}
 		provider.IsLocal = localProviders[name]
 
+		// If Models is empty, skip this provider
+		if len(provider.Models) == 0 {
+			provider.Enabled = false
+		}
+
+		// Default concurrency to 1 if not set or invalid
+		if provider.Concurrency <= 0 {
+			provider.Concurrency = 1
+		}
+
 		// Update the map
 		config.Providers[name] = provider
 	}
@@ -193,7 +224,7 @@ type MCPClient struct {
 }
 
 func NewMCPClient() (*MCPClient, error) {
-	cmd := exec.Command("go", "run", "main.go", "server", "--config", *configFile)
+	cmd := exec.Command("go", "run", "./main.go", "server", "--config", *configFile)
 
 	// Build environment variables from config
 	var envVars []string
@@ -252,7 +283,7 @@ func (c *MCPClient) Stop() error {
 	return nil
 }
 
-func (c *MCPClient) makeRequest(request MCPRequest) (*MCPResponse, error) {
+func (c *MCPClient) makeRequest(request MCPRequest) (*MCPResponse, time.Duration, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -261,69 +292,102 @@ func (c *MCPClient) makeRequest(request MCPRequest) (*MCPResponse, error) {
 
 	jsonData, err := json.Marshal(request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
+
+	requestStart := time.Now()
 
 	_, err = fmt.Fprintln(c.stdin, string(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, 0, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	err = c.stdin.Flush()
 	if err != nil {
-		return nil, fmt.Errorf("failed to flush stdin: %w", err)
+		return nil, 0, fmt.Errorf("failed to flush stdin: %w", err)
 	}
 
 	// Read lines until we get a valid JSON response with timeout
 	type scanResult struct {
 		line  string
 		valid bool
+		ttft  time.Duration
 		err   error
 	}
 
 	resultChan := make(chan scanResult, 1)
 
 	go func() {
-		maxLines := 20 // prevent infinite loop
+		var buffer strings.Builder
+		maxLines := 50 // Allow more lines for multi-line JSON
+		jsonStarted := false
+		var firstDataTime time.Time
+
 		for i := 0; i < maxLines; i++ {
 			if c.stdout.Scan() {
 				line := c.stdout.Text()
-				// Check if this line looks like JSON
-				if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
-					resultChan <- scanResult{line: line, valid: true, err: nil}
-					return
+
+				// Track time to first data (TTFT)
+				if firstDataTime.IsZero() && len(strings.TrimSpace(line)) > 0 {
+					firstDataTime = time.Now()
 				}
-				// Skip instruction lines and other non-JSON content
-				if *verboseOutput {
-					fmt.Printf("🔍 DEBUG: Skipping line: %s\n", strings.TrimSpace(line))
+
+				// Check if this line starts JSON
+				if strings.HasPrefix(strings.TrimSpace(line), "{") {
+					jsonStarted = true
+					buffer.Reset() // Start fresh
+				}
+
+				// If we're collecting JSON, add this line
+				if jsonStarted {
+					buffer.WriteString(line)
+
+					// Try to parse accumulated JSON
+					accumulated := buffer.String()
+					var testJSON json.RawMessage
+					if err := json.Unmarshal([]byte(accumulated), &testJSON); err == nil {
+						// Valid JSON found!
+						ttft := time.Duration(0)
+						if !firstDataTime.IsZero() {
+							ttft = firstDataTime.Sub(requestStart)
+						}
+						resultChan <- scanResult{line: accumulated, valid: true, ttft: ttft, err: nil}
+						return
+					}
+					// Not valid yet, continue accumulating
+				} else {
+					// Skip non-JSON lines (like startup messages)
+					if *verboseOutput {
+						fmt.Printf("🔍 DEBUG: Skipping line: %s\n", strings.TrimSpace(line))
+					}
 				}
 			} else {
 				if err := c.stdout.Err(); err != nil {
-					resultChan <- scanResult{line: "", valid: false, err: err}
+					resultChan <- scanResult{line: "", valid: false, ttft: 0, err: err}
 					return
 				}
 			}
 		}
-		resultChan <- scanResult{line: "", valid: false, err: fmt.Errorf("no valid JSON response after %d lines", maxLines)}
+		resultChan <- scanResult{line: "", valid: false, ttft: 0, err: fmt.Errorf("no valid JSON response after %d lines", maxLines)}
 	}()
 
 	// Wait for response with timeout
 	select {
 	case result := <-resultChan:
 		if result.err != nil {
-			return nil, result.err
+			return nil, 0, result.err
 		}
 		if !result.valid {
-			return nil, fmt.Errorf("no valid JSON response received")
+			return nil, 0, fmt.Errorf("no valid JSON response received")
 		}
 		var response MCPResponse
 		err = json.Unmarshal([]byte(result.line), &response)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+			return nil, 0, fmt.Errorf("failed to unmarshal response: %w", err)
 		}
-		return &response, nil
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for JSON response after 10 seconds")
+		return &response, result.ttft, nil
+	case <-time.After(30 * time.Second):
+		return nil, 0, fmt.Errorf("timeout waiting for JSON response after 30 seconds")
 	}
 }
 
@@ -342,7 +406,8 @@ func NewProviderTester(config *ProviderConfig) *ProviderTester {
 }
 
 func (pt *ProviderTester) TestProvider(ctx context.Context) []*ModelTestResult {
-	fmt.Printf("🔍 DEBUG: Starting TestProvider for %s\n", pt.config.Name)
+	displayName := pt.config.GetDisplayName()
+	fmt.Printf("🔍 DEBUG: Starting TestProvider for %s\n", displayName)
 	var results []*ModelTestResult
 
 	configured := pt.isConfigured()
@@ -350,10 +415,10 @@ func (pt *ProviderTester) TestProvider(ctx context.Context) []*ModelTestResult {
 	fmt.Printf("🔍 DEBUG: Configured=%t, Reason=%s\n", configured, skipReason)
 
 	if !configured {
-		fmt.Printf("⚪ %s: %s\n", gray(pt.config.Name), skipReason)
+		fmt.Printf("⚪ %s: %s\n", gray(displayName), skipReason)
 		return []*ModelTestResult{
 			{
-				Provider: pt.config.Name,
+				Provider: displayName,
 				Reason:   skipReason,
 				Skipped:  true,
 			},
@@ -363,10 +428,10 @@ func (pt *ProviderTester) TestProvider(ctx context.Context) []*ModelTestResult {
 	if pt.config.IsLocal {
 		fmt.Printf("🔍 DEBUG: IsLocal provider, checking service...\n")
 		if !pt.isLocalServiceRunning() {
-			fmt.Printf("⚪ %s: %s\n", gray(pt.config.Name), skipReason)
+			fmt.Printf("⚪ %s: %s\n", gray(displayName), skipReason)
 			return []*ModelTestResult{
 				{
-					Provider: pt.config.Name,
+					Provider: displayName,
 					Reason:   "Local service not running",
 					Skipped:  true,
 				},
@@ -374,46 +439,36 @@ func (pt *ProviderTester) TestProvider(ctx context.Context) []*ModelTestResult {
 		}
 	}
 
-	fmt.Printf("🔍 DEBUG: Creating MCP client for %s...\n", pt.config.Name)
-	client, err := NewMCPClient()
-	if err != nil {
-		fmt.Printf("🔍 DEBUG: Failed to create MCP client: %s\n", err)
-		return []*ModelTestResult{
-			{
-				Provider: pt.config.Name,
-				Error:    fmt.Sprintf("Failed to create MCP client: %s", err),
-				Skipped:  true,
-			},
-		}
-	}
+	fmt.Printf("🔍 DEBUG: About to test %d models for %s (concurrency: %d)\n",
+		len(pt.config.Models), displayName, pt.config.Concurrency)
 
-	fmt.Printf("🔍 DEBUG: MCP client created successfully for %s\n", pt.config.Name)
-	defer func() { _ = client.Stop() }()
-
-	// Start the MCP server
-	if err := client.Start(); err != nil {
-		fmt.Printf("🔍 DEBUG: Failed to start MCP server: %s\n", err)
-		return []*ModelTestResult{
-			{
-				Provider: pt.config.Name,
-				Error:    fmt.Sprintf("Failed to start MCP server: %s", err),
-				Skipped:  true,
-			},
-		}
-	}
-	fmt.Printf("🔍 DEBUG: MCP server started successfully for %s\n", pt.config.Name)
-
-	// Give server time to initialize properly
-	time.Sleep(2 * time.Second)
-	fmt.Printf("🔍 DEBUG: About to test %d models for %s\n", len(pt.config.Models), pt.config.Name)
+	// Test models with concurrency limit
+	var wg sync.WaitGroup
+	var resultsMutex sync.Mutex
+	semaphore := make(chan struct{}, pt.config.Concurrency)
 
 	for _, model := range pt.config.Models {
-		fmt.Printf("🔍 DEBUG: Testing model %s for %s\n", model, pt.config.Name)
-		result := pt.testModel(ctx, model, client)
-		results = append(results, result)
-		time.Sleep(1 * time.Second)
-		fmt.Printf("🔍 DEBUG: Completed model %s, continuing...\n", model)
+		wg.Add(1)
+		go func(m string) {
+			defer wg.Done()
+
+			// Acquire semaphore slot
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			fmt.Printf("🔍 DEBUG: Testing model %s for %s\n", m, displayName)
+			result := pt.testModel(ctx, m)
+
+			resultsMutex.Lock()
+			results = append(results, result)
+			resultsMutex.Unlock()
+
+			fmt.Printf("🔍 DEBUG: Completed model %s, continuing...\n", m)
+		}(model)
 	}
+
+	// Wait for all model tests to complete
+	wg.Wait()
 
 	return results
 }
@@ -422,11 +477,15 @@ func (pt *ProviderTester) isConfigured() bool {
 	if pt.config.IsLocal {
 		return true
 	}
-	// Check both single APIKey and multiple APIKeys array
-	hasKey := (pt.config.APIKey != "" && pt.config.APIKey != "your-api-key-here") || len(pt.config.APIKeys) > 0
+	// Check both single APIKey, multiple APIKeys array, and OAuth
+	hasKey := (pt.config.APIKey != "" && pt.config.APIKey != "your-api-key-here") ||
+		len(pt.config.APIKeys) > 0 ||
+		(pt.config.OAuth != nil && pt.config.OAuth.AccessToken != "")
 	if *verboseOutput {
 		if len(pt.config.APIKeys) > 0 {
 			fmt.Printf("🔍 DEBUG: %s has %d API keys, Configured=%t\n", pt.config.Name, len(pt.config.APIKeys), hasKey)
+		} else if pt.config.OAuth != nil {
+			fmt.Printf("🔍 DEBUG: %s has OAuth, Configured=%t\n", pt.config.Name, hasKey)
 		} else {
 			fmt.Printf("🔍 DEBUG: %s APIKey='%s', Configured=%t\n", pt.config.Name, pt.config.APIKey, hasKey)
 		}
@@ -449,6 +508,12 @@ func (pt *ProviderTester) getSkipReason() string {
 			}
 		}
 		return "Local provider available"
+	}
+	if pt.config.OAuth != nil && pt.config.OAuth.AccessToken != "" {
+		return "OAuth configured"
+	}
+	if len(pt.config.APIKeys) > 0 {
+		return "Multiple API keys configured"
 	}
 	if pt.config.APIKey == "" || pt.config.APIKey == "your-api-key-here" {
 		return "Skipped (missing API key)"
@@ -485,17 +550,42 @@ func (pt *ProviderTester) isLocalServiceRunning() bool {
 	return true
 }
 
-func (pt *ProviderTester) testModel(ctx context.Context, model string, client *MCPClient) *ModelTestResult {
-	fmt.Printf("🔍 DEBUG: Starting testModel for %s[%s]\n", pt.config.Name, model)
+func (pt *ProviderTester) testModel(ctx context.Context, model string) *ModelTestResult {
+	displayName := pt.config.GetDisplayName()
+	fmt.Printf("🔍 DEBUG: Starting testModel for %s[%s]\n", displayName, model)
 	start := time.Now()
 	result := &ModelTestResult{
-		Provider:     pt.config.Name,
+		Provider:     displayName,
 		Model:        model,
 		Configured:   true,
 		ResponseTime: 0,
 	}
 
-	fmt.Printf("🔍 DEBUG: Calling testInitialize for %s[%s]\n", pt.config.Name, model)
+	// Create a dedicated client for this model test
+	fmt.Printf("🔍 DEBUG: Creating MCP client for %s[%s]...\n", displayName, model)
+	client, err := NewMCPClient()
+	if err != nil {
+		fmt.Printf("🔍 DEBUG: Failed to create MCP client: %s\n", err)
+		result.Error = fmt.Sprintf("Failed to create MCP client: %s", err)
+		result.Skipped = true
+		result.Reason = fmt.Sprintf("Client creation failed: %s", err)
+		return result
+	}
+	defer func() { _ = client.Stop() }()
+
+	// Start the MCP server
+	if err := client.Start(); err != nil {
+		fmt.Printf("🔍 DEBUG: Failed to start MCP server: %s\n", err)
+		result.Error = fmt.Sprintf("Failed to start MCP server: %s", err)
+		result.Skipped = true
+		result.Reason = fmt.Sprintf("Server start failed: %s", err)
+		return result
+	}
+
+	// Give server time to initialize
+	time.Sleep(2 * time.Second)
+
+	fmt.Printf("🔍 DEBUG: Calling testInitialize for %s[%s]\n", displayName, model)
 	initStart := time.Now()
 	if err := pt.testInitialize(ctx, client); err != nil {
 		fmt.Printf("🔍 DEBUG: testInitialize failed: %s\n", err)
@@ -508,14 +598,14 @@ func (pt *ProviderTester) testModel(ctx context.Context, model string, client *M
 	}
 	result.InitTime = time.Since(initStart)
 
-	fmt.Printf("🔍 DEBUG: Initialize passed for %s[%s]\n", pt.config.Name, model)
+	fmt.Printf("🔍 DEBUG: Initialize passed for %s[%s]\n", displayName, model)
 	if *verboseOutput {
-		fmt.Printf("✅ %s[%s]: Initialization passed (%dms)\n", green(pt.config.Name), model, result.InitTime.Milliseconds())
+		fmt.Printf("✅ %s[%s]: Initialization passed (%dms)\n", green(displayName), model, result.InitTime.Milliseconds())
 	} else {
-		fmt.Printf("✅ %s[%s]: Initialization passed\n", green(pt.config.Name), model)
+		fmt.Printf("✅ %s[%s]: Initialization passed\n", green(displayName), model)
 	}
 
-	fmt.Printf("🔍 DEBUG: Calling testTools for %s[%s]\n", pt.config.Name, model)
+	fmt.Printf("🔍 DEBUG: Calling testTools for %s[%s]\n", displayName, model)
 	if err := pt.testTools(ctx, client); err != nil {
 		fmt.Printf("🔍 DEBUG: testTools failed: %s\n", err)
 		result.Error = err.Error()
@@ -525,10 +615,10 @@ func (pt *ProviderTester) testModel(ctx context.Context, model string, client *M
 		return result
 	}
 
-	fmt.Printf("🔍 DEBUG: Tools passed for %s[%s]\n", pt.config.Name, model)
-	fmt.Printf("🔍 DEBUG: Calling testWriteFile for %s[%s]\n", pt.config.Name, model)
+	fmt.Printf("🔍 DEBUG: Tools passed for %s[%s]\n", displayName, model)
+	fmt.Printf("🔍 DEBUG: Calling testWriteFile for %s[%s]\n", displayName, model)
 	writeStart := time.Now()
-	outputFile, generatedCode, err := pt.testWriteFileWithCapture(ctx, model, client)
+	outputFile, generatedCode, ttft, err := pt.testWriteFileWithCapture(ctx, model, client)
 	if err != nil {
 		fmt.Printf("🔍 DEBUG: testWriteFile failed: %s\n", err)
 		result.Error = err.Error()
@@ -539,6 +629,7 @@ func (pt *ProviderTester) testModel(ctx context.Context, model string, client *M
 		return result
 	}
 	result.WriteTime = time.Since(writeStart)
+	result.TTFT = ttft
 	result.OutputFile = outputFile
 	result.GeneratedCode = generatedCode
 
@@ -546,14 +637,14 @@ func (pt *ProviderTester) testModel(ctx context.Context, model string, client *M
 	result.ResponseTime = time.Since(start)
 
 	fmt.Printf("🔍 DEBUG: All tests passed for %s[%s] - Write took %dms, Total: %dms\n",
-		pt.config.Name, model, result.WriteTime.Milliseconds(), result.ResponseTime.Milliseconds())
+		displayName, model, result.WriteTime.Milliseconds(), result.ResponseTime.Milliseconds())
 	result.APITest = true
 	result.ChatTest = true
 	result.ToolsTest = true
 
 	if *verboseOutput {
 		fmt.Printf("✅ %s[%s]: All tests passed - Write: %dms, Total: %dms, Output: %s\n",
-			green(pt.config.Name), model, result.WriteTime.Milliseconds(), result.ResponseTime.Milliseconds(), outputFile)
+			green(displayName), model, result.WriteTime.Milliseconds(), result.ResponseTime.Milliseconds(), outputFile)
 	}
 
 	return result
@@ -573,7 +664,7 @@ func (pt *ProviderTester) testInitialize(ctx context.Context, client *MCPClient)
 		},
 	}
 
-	resp, err := client.makeRequest(request)
+	resp, _, err := client.makeRequest(request)
 	if err != nil {
 		return fmt.Errorf("initialize test failed: %w", err)
 	}
@@ -592,7 +683,7 @@ func (pt *ProviderTester) testTools(ctx context.Context, client *MCPClient) erro
 		Params:  map[string]interface{}{},
 	}
 
-	resp, err := client.makeRequest(request)
+	resp, _, err := client.makeRequest(request)
 	if err != nil {
 		return fmt.Errorf("tools list test failed: %w", err)
 	}
@@ -604,7 +695,7 @@ func (pt *ProviderTester) testTools(ctx context.Context, client *MCPClient) erro
 	if result, ok := resp.Result.(map[string]interface{}); ok {
 		if tools, ok := result["tools"].([]interface{}); ok {
 			if *verboseOutput {
-				fmt.Printf("✅ %s: Tools test passed (%d tools available)\n", green(pt.config.Name), len(tools))
+				fmt.Printf("✅ %s: Tools test passed (%d tools available)\n", green(pt.config.GetDisplayName()), len(tools))
 			}
 			return nil
 		}
@@ -613,13 +704,14 @@ func (pt *ProviderTester) testTools(ctx context.Context, client *MCPClient) erro
 	return fmt.Errorf("no tools found in response")
 }
 
-func (pt *ProviderTester) testWriteFileWithCapture(ctx context.Context, model string, client *MCPClient) (string, string, error) {
+func (pt *ProviderTester) testWriteFileWithCapture(ctx context.Context, model string, client *MCPClient) (string, string, time.Duration, error) {
+	displayName := pt.config.GetDisplayName()
 	// Create output file path
 	timestamp := time.Now().Unix()
 	// Sanitize model name for filename
 	sanitizedModel := strings.ReplaceAll(model, "/", "_")
 	sanitizedModel = strings.ReplaceAll(sanitizedModel, ":", "_")
-	outputFile := fmt.Sprintf("/tmp/test_%s_%s_%d.txt", pt.config.Name, sanitizedModel, timestamp)
+	outputFile := fmt.Sprintf("/tmp/test_%s_%s_%d.txt", displayName, sanitizedModel, timestamp)
 
 	request := MCPRequest{
 		JSONRPC: "2.0",
@@ -628,24 +720,24 @@ func (pt *ProviderTester) testWriteFileWithCapture(ctx context.Context, model st
 			"name": "write",
 			"arguments": map[string]interface{}{
 				"file_path": outputFile,
-				"prompt":    fmt.Sprintf("Test message to %s[%s]: %s", pt.config.Name, model, TEST_MESSAGE),
-				"provider":  pt.config.Name,
+				"prompt":    fmt.Sprintf("Test message to %s[%s]: %s", displayName, model, TEST_MESSAGE),
+				"provider":  pt.config.Name, // Keep real provider name for API routing
 				"model":     model,
 			},
 		},
 	}
 
-	resp, err := client.makeRequest(request)
+	resp, ttft, err := client.makeRequest(request)
 	if err != nil {
-		return outputFile, "", fmt.Errorf("write file test failed: %w", err)
+		return outputFile, "", 0, fmt.Errorf("write file test failed: %w", err)
 	}
 
 	if resp.Error != nil {
-		return outputFile, "", fmt.Errorf("MCP error during write file: %s", resp.Error.Message)
+		return outputFile, "", ttft, fmt.Errorf("MCP error during write file: %s", resp.Error.Message)
 	}
 
 	if resp.Result == nil {
-		return outputFile, "", fmt.Errorf("no result in write file response")
+		return outputFile, "", ttft, fmt.Errorf("no result in write file response")
 	}
 
 	// Read the generated code from the file
@@ -656,7 +748,7 @@ func (pt *ProviderTester) testWriteFileWithCapture(ctx context.Context, model st
 		fmt.Printf("⚠️  Warning: Could not read generated file %s: %v\n", outputFile, err)
 	}
 
-	return outputFile, generatedCode, nil
+	return outputFile, generatedCode, ttft, nil
 }
 
 // =============================================
@@ -684,7 +776,15 @@ func printResults(results map[string][]*ModelTestResult) {
 	var totalProviders, totalModels, configuredProviders, testedModels int
 	var totalTests, apiPassed, chatPassed, toolsPassed int
 
-	for providerName, modelResults := range results {
+	// Sort provider names for consistent output
+	var providerNames []string
+	for name := range results {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
+	for _, providerName := range providerNames {
+		modelResults := results[providerName]
 		totalProviders++
 		configured := false
 		providerTested := false
@@ -728,55 +828,52 @@ func printResults(results map[string][]*ModelTestResult) {
 	fmt.Printf("🔧 Tools Tests Passed: %d/%d\n", toolsPassed, totalTests)
 
 	fmt.Println("\n📈 Detailed Results:")
-	fmt.Println(strings.Repeat("-", 100))
-	fmt.Printf("%-15s %-35s %-8s %-8s %-10s %-10s %-12s\n",
-		"Provider", "Model", "API", "Tools", "Init(ms)", "Write(ms)", "Total(ms)")
-	fmt.Println(strings.Repeat("-", 100))
+	fmt.Println(strings.Repeat("-", 110))
+	fmt.Printf("%-50s %-8s %-8s %-10s %-10s %-10s %-12s\n",
+		"Model", "API", "Tools", "Init(ms)", "TTFT(ms)", "Write(ms)", "Total(ms)")
+	fmt.Println(strings.Repeat("-", 110))
 
-	for providerName, modelResults := range results {
-		fmt.Printf("%s (%d models):\n", cyan(providerName), len(modelResults))
+	// Sort provider names for detailed results
+	for _, providerName := range providerNames {
+		modelResults := results[providerName]
+
+		// Sort model results by model name for consistent output
+		sort.Slice(modelResults, func(i, j int) bool {
+			return modelResults[i].Model < modelResults[j].Model
+		})
+
+		fmt.Printf("\n%s (%d %s):\n", cyan(providerName), len(modelResults), pluralize("model", len(modelResults)))
 		for _, modelResult := range modelResults {
-			if modelResult.Skipped {
-				fmt.Printf("  ⚪ %-35s: %s\n", modelResult.Model, modelResult.Reason)
-			} else {
-				initTime := "N/A"
-				writeTime := "N/A"
-				totalTime := "N/A"
-				if modelResult.InitTime > 0 {
-					initTime = fmt.Sprintf("%d", modelResult.InitTime.Milliseconds())
-				}
-				if modelResult.WriteTime > 0 {
-					writeTime = fmt.Sprintf("%d", modelResult.WriteTime.Milliseconds())
-				}
-				if modelResult.ResponseTime > 0 {
-					totalTime = fmt.Sprintf("%d", modelResult.ResponseTime.Milliseconds())
-				}
-
-				fmt.Printf("  %-35s %-8s %-8s %-10s %-10s %-12s\n",
-					modelResult.Model,
-					boolToEmoji(modelResult.APITest),
-					boolToEmoji(modelResult.ToolsTest),
-					initTime,
-					writeTime,
-					totalTime,
-				)
-
-				// Show output file if available
-				if modelResult.OutputFile != "" && *verboseOutput {
-					codePreview := modelResult.GeneratedCode
-					if len(codePreview) > 100 {
-						codePreview = codePreview[:100] + "..."
-					}
-					fmt.Printf("     📄 Output: %s (%.1f KB)\n", modelResult.OutputFile, float64(len(modelResult.GeneratedCode))/1024)
-					if codePreview != "" {
-						fmt.Printf("     📝 Preview: %s\n", strings.TrimSpace(codePreview))
-					}
-				}
+			initTime := "N/A"
+			ttftTime := "N/A"
+			writeTime := "N/A"
+			totalTime := "N/A"
+			if modelResult.InitTime > 0 {
+				initTime = fmt.Sprintf("%d", modelResult.InitTime.Milliseconds())
 			}
+			if modelResult.TTFT > 0 {
+				ttftTime = fmt.Sprintf("%d", modelResult.TTFT.Milliseconds())
+			}
+			if modelResult.WriteTime > 0 {
+				writeTime = fmt.Sprintf("%d", modelResult.WriteTime.Milliseconds())
+			}
+			if modelResult.ResponseTime > 0 {
+				totalTime = fmt.Sprintf("%d", modelResult.ResponseTime.Milliseconds())
+			}
+
+			fmt.Printf("  %-48s %-8s %-8s %-10s %-10s %-10s %-12s\n",
+				modelResult.Model,
+				boolToEmoji(modelResult.APITest),
+				boolToEmoji(modelResult.ToolsTest),
+				initTime,
+				ttftTime,
+				writeTime,
+				totalTime,
+			)
 		}
 	}
 
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println(strings.Repeat("-", 110))
 
 	fmt.Println("\n🎯 Recommendations:")
 	if totalModels == 0 {
@@ -797,6 +894,13 @@ func boolToEmoji(b bool) string {
 		return "✅"
 	}
 	return "❌"
+}
+
+func pluralize(word string, count int) string {
+	if count == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 func printUsage() {
@@ -874,16 +978,27 @@ func main() {
 	}()
 
 	results := make(map[string][]*ModelTestResult)
+	var resultsMutex sync.Mutex
+	var wg sync.WaitGroup
 
-	fmt.Println("\n🧪 Running provider tests...")
+	fmt.Println("\n🧪 Running provider tests concurrently...")
 
+	// Run each provider test concurrently
 	for _, tester := range testers {
-		providerResults := tester.TestProvider(ctx)
-		if len(providerResults) > 0 {
-			results[tester.config.Name] = providerResults
-		}
-		time.Sleep(1 * time.Second)
+		wg.Add(1)
+		go func(t *ProviderTester) {
+			defer wg.Done()
+			providerResults := t.TestProvider(ctx)
+			if len(providerResults) > 0 {
+				resultsMutex.Lock()
+				results[t.config.GetDisplayName()] = providerResults
+				resultsMutex.Unlock()
+			}
+		}(tester)
 	}
+
+	// Wait for all provider tests to complete
+	wg.Wait()
 
 	printResults(results)
 

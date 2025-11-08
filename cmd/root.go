@@ -48,7 +48,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cerebras-mcp.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default searches: ./config.yaml, ~/.mcp-code-api/config.yaml)")
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().Bool("debug", false, "debug mode with detailed logging")
 
@@ -65,12 +65,33 @@ func initConfig() {
 	} else {
 		// Find home directory.
 		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
+		if err != nil {
+			home = "."
+		}
 
-		// Search config in home directory with name ".cerebras-mcp" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".cerebras-mcp")
+		// Try to find config.yaml in common locations
+		configLocations := []string{
+			"./config.yaml",                      // Current directory
+			home + "/.mcp-code-api/config.yaml",  // User config directory
+		}
+
+		configFound := false
+		for _, configPath := range configLocations {
+			if _, err := os.Stat(configPath); err == nil {
+				viper.SetConfigFile(configPath)
+				configFound = true
+				break
+			}
+		}
+
+		// If no config file found, set default search paths
+		if !configFound {
+			viper.AddConfigPath(".")
+			viper.AddConfigPath(home + "/.mcp-code-api")
+			viper.AddConfigPath(home)
+			viper.SetConfigType("yaml")
+			viper.SetConfigName("config")
+		}
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match

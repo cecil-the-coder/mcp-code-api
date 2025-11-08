@@ -234,19 +234,19 @@ func Load() *Config {
 	viper.SetDefault("providers.cerebras.api_key", "")
 	viper.SetDefault("providers.cerebras.base_url", "https://api.cerebras.ai")
 	viper.SetDefault("providers.cerebras.model", "zai-glm-4.6")
-	viper.SetDefault("providers.cerebras.temperature", 0.1)
+	viper.SetDefault("providers.cerebras.temperature", 0.6)
 
 	// OpenRouter defaults (legacy support)
 	viper.SetDefault("providers.openrouter.api_key", "")
-	viper.SetDefault("providers.openrouter.site_url", "https://github.com/cerebras/cerebras-code-mcp")
+	viper.SetDefault("providers.openrouter.site_url", "https://github.com/cecil-the-coder/mcp-code-api")
 	viper.SetDefault("providers.openrouter.site_name", "MCP Code API")
 	viper.SetDefault("providers.openrouter.base_url", "https://openrouter.ai/api")
 	viper.SetDefault("providers.openrouter.model", "qwen/qwen3-coder")
 
 	// Auth defaults
 	viper.SetDefault("auth.token_store.type", "file")
-	viper.SetDefault("auth.token_store.path", "~/.cerebras-mcp/tokens")
-	viper.SetDefault("auth.token_store.encryption_key", "cerebras-mcp-token-key")
+	viper.SetDefault("auth.token_store.path", "~/.mcp-code-api/tokens")
+	viper.SetDefault("auth.token_store.encryption_key", "mcp-code-api-token-key")
 
 	// Configure environment variable binding
 	viper.AutomaticEnv()
@@ -255,10 +255,16 @@ func Load() *Config {
 	// Legacy environment variable support for backward compatibility
 	bindLegacyEnv("providers.openai.api_key", "OPENAI_API_KEY")
 	bindLegacyEnv("providers.anthropic.api_key", "ANTHROPIC_API_KEY")
+	bindLegacyEnv("providers.anthropic.api_key", "ANTHROPIC_AUTH_TOKEN") // Alternative token name (e.g., z.ai)
+	bindLegacyEnv("providers.anthropic.base_url", "ANTHROPIC_BASE_URL") // Support custom base URLs
 	bindLegacyEnv("providers.gemini.api_key", "GEMINI_API_KEY")
 	bindLegacyEnv("providers.qwen.api_key", "QWEN_API_KEY")
 	bindLegacyEnv("providers.cerebras.api_key", "CEREBRAS_API_KEY")
 	bindLegacyEnv("providers.openrouter.api_key", "OPENROUTER_API_KEY")
+	bindLegacyEnv("providers.openai.base_url", "OPENAI_BASE_URL") // Support OpenAI-compatible endpoints
+	bindLegacyEnv("providers.gemini.base_url", "GEMINI_BASE_URL")
+	bindLegacyEnv("providers.qwen.base_url", "QWEN_BASE_URL")
+	bindLegacyEnv("providers.cerebras.base_url", "CEREBRAS_BASE_URL")
 	bindLegacyEnv("providers.cerebras.model", "CEREBRAS_MODEL")
 	bindLegacyEnv("providers.cerebras.max_tokens", "CEREBRAS_MAX_TOKENS")
 	bindLegacyEnv("providers.cerebras.temperature", "CEREBRAS_TEMPERATURE")

@@ -23,14 +23,21 @@ type ProviderOAuthConfig struct {
 	RefreshURL   string
 }
 
-// performOAuthFlow performs the full OAuth authentication flow
+// performOAuthFlow performs the full OAuth authentication flow with PKCE
 func (w *Wizard) performOAuthFlow(providerName string, config ProviderOAuthConfig) (*auth.TokenInfo, error) {
 	fmt.Printf("\n🔐 Starting OAuth flow for %s...\n", providerName)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	// Start callback server
-	callbackPort := 8080
-	server, err := oauth.NewCallbackServer(callbackPort)
+	// Generate PKCE parameters for enhanced security
+	pkceParams, err := oauth.GeneratePKCEParams()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PKCE parameters: %w", err)
+	}
+	fmt.Println("🔒 PKCE protection enabled")
+
+	// Start callback server - try a range of ports like llxprt-code does
+	// Port range: 8080-8110 (31 ports to try)
+	server, err := oauth.NewCallbackServerWithPortRange(8080, 8110)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -43,8 +50,9 @@ func (w *Wizard) performOAuthFlow(providerName string, config ProviderOAuthConfi
 	redirectURL := server.GetRedirectURL()
 	fmt.Printf("📍 Callback server started at: %s\n", redirectURL)
 
-	// Create storage and authenticator
+	// Create memory-based storage (tokens will be saved to config.yaml instead)
 	storage := auth.NewMemoryTokenStorage()
+
 	var authenticator auth.OAuthAuthenticator
 
 	switch providerName {
@@ -58,15 +66,18 @@ func (w *Wizard) performOAuthFlow(providerName string, config ProviderOAuthConfi
 		return nil, fmt.Errorf("unsupported OAuth provider: %s", providerName)
 	}
 
-	// Configure OAuth
+	// Configure OAuth with PKCE parameters
 	oauthConfig := &auth.OAuthConfig{
-		ClientID:     config.ClientID,
-		ClientSecret: config.ClientSecret,
-		RedirectURL:  redirectURL,
-		Scopes:       config.Scopes,
-		AuthURL:      config.AuthURL,
-		TokenURL:     config.TokenURL,
-		RefreshURL:   config.RefreshURL,
+		ClientID:      config.ClientID,
+		ClientSecret:  config.ClientSecret,
+		RedirectURL:   redirectURL,
+		Scopes:        config.Scopes,
+		AuthURL:       config.AuthURL,
+		TokenURL:      config.TokenURL,
+		RefreshURL:    config.RefreshURL,
+		CodeChallenge: pkceParams.CodeChallenge,
+		CodeVerifier:  pkceParams.CodeVerifier,
+		State:         pkceParams.State,
 	}
 
 	authConfig := auth.AuthConfig{
@@ -110,6 +121,12 @@ func (w *Wizard) performOAuthFlow(providerName string, config ProviderOAuthConfi
 		return nil, fmt.Errorf("OAuth error: %s", result.Error)
 	}
 
+	// Validate state parameter to prevent CSRF attacks
+	if !oauth.ValidateState(pkceParams.State, result.State) {
+		return nil, fmt.Errorf("state validation failed: possible CSRF attack")
+	}
+	fmt.Println("✅ State validated (CSRF protection)")
+
 	fmt.Println("\n✅ Received authorization code!")
 	fmt.Println("🔄 Exchanging code for access token...")
 
@@ -135,52 +152,35 @@ func (w *Wizard) configureProviderOAuth(providerName, displayName string) (*Prov
 	fmt.Printf("\n🔐 %s OAuth Configuration\n", displayName)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	// Get provider-specific OAuth config
-	var defaultAuthURL, defaultTokenURL, defaultRefreshURL string
-	var defaultScopes []string
+	// Get preconfigured OAuth settings from defaults
+	oauthDefaults, ok := oauth.GetProviderConfig(providerName)
+	if !ok {
+		return nil, nil, fmt.Errorf("OAuth not supported for %s", providerName)
+	}
 
+	// Show information about the OAuth flow
 	switch providerName {
 	case "anthropic":
-		defaultAuthURL = "https://api.anthropic.com/oauth/authorize"
-		defaultTokenURL = "https://api.anthropic.com/oauth/token"
-		defaultRefreshURL = "https://api.anthropic.com/oauth/refresh"
-		defaultScopes = []string{"messages", "tools"}
-		fmt.Println("Register your OAuth app at: https://console.anthropic.com/settings/oauth")
+		fmt.Println("Using official Claude Code CLI OAuth credentials")
+		fmt.Println("You'll authenticate with your Anthropic account in the browser")
 	case "gemini":
-		defaultAuthURL = "https://accounts.google.com/o/oauth2/v2/auth"
-		defaultTokenURL = "https://oauth2.googleapis.com/token"
-		defaultScopes = []string{"https://www.googleapis.com/auth/generative-language"}
-		fmt.Println("Register your OAuth app at: https://console.cloud.google.com/apis/credentials")
+		fmt.Println("Using official Gemini CLI OAuth credentials")
+		fmt.Println("You'll authenticate with your Google account in the browser")
 	case "qwen":
-		defaultAuthURL = "https://dashscope.aliyuncs.com/oauth/authorize"
-		defaultTokenURL = "https://dashscope.aliyuncs.com/oauth/token"
-		defaultScopes = []string{"api"}
-		fmt.Println("Register your OAuth app at: https://dashscope.console.aliyun.com/")
-	default:
-		return nil, nil, fmt.Errorf("OAuth not supported for %s", providerName)
+		fmt.Println("Using Qwen Code OAuth credentials")
+		fmt.Println("You'll authenticate with your Qwen account in the browser")
 	}
 
 	fmt.Println()
 
-	// Collect OAuth credentials
-	clientID := w.prompt(fmt.Sprintf("Enter %s OAuth Client ID: ", displayName), false)
-	if clientID == "" {
-		return nil, nil, fmt.Errorf("client ID is required")
-	}
-
-	clientSecret := w.prompt(fmt.Sprintf("Enter %s OAuth Client Secret: ", displayName), false)
-	if clientSecret == "" {
-		return nil, nil, fmt.Errorf("client secret is required")
-	}
-
 	config := &ProviderOAuthConfig{
 		Provider:     providerName,
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Scopes:       defaultScopes,
-		AuthURL:      defaultAuthURL,
-		TokenURL:     defaultTokenURL,
-		RefreshURL:   defaultRefreshURL,
+		ClientID:     oauthDefaults.ClientID,
+		ClientSecret: oauthDefaults.ClientSecret,
+		Scopes:       oauthDefaults.Scopes,
+		AuthURL:      oauthDefaults.AuthURL,
+		TokenURL:     oauthDefaults.TokenURL,
+		RefreshURL:   oauthDefaults.RefreshURL,
 	}
 
 	// Perform OAuth flow

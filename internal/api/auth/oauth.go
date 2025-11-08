@@ -222,14 +222,18 @@ func (a *OAuthAuthenticatorImpl) StartOAuthFlow(ctx context.Context, scopes []st
 		}
 	}
 
-	// Generate random state
-	state, err := a.generateRandomState()
-	if err != nil {
-		return "", &AuthError{
-			Provider: a.provider,
-			Code:     ErrCodeOAuthFlowFailed,
-			Message:  "Failed to generate OAuth state",
-			Details:  err.Error(),
+	// Use provided state if available, otherwise generate random state
+	state := a.config.State
+	if state == "" {
+		var err error
+		state, err = a.generateRandomState()
+		if err != nil {
+			return "", &AuthError{
+				Provider: a.provider,
+				Code:     ErrCodeOAuthFlowFailed,
+				Message:  "Failed to generate OAuth state",
+				Details:  err.Error(),
+			}
 		}
 	}
 	a.state = state

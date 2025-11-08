@@ -64,18 +64,20 @@ type AuthConfig struct {
 
 // OAuthConfig represents OAuth configuration
 type OAuthConfig struct {
-	ClientID     string    `json:"client_id"`
-	ClientSecret string    `json:"client_secret"`
-	RedirectURL  string    `json:"redirect_url,omitempty"`
-	Scopes       []string  `json:"scopes"`
-	AuthURL      string    `json:"auth_url"`
-	TokenURL     string    `json:"token_url"`
-	RefreshURL   string    `json:"refresh_url,omitempty"`
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	TokenType    string    `json:"token_type"`
-	State        string    `json:"state,omitempty"`
+	ClientID      string    `json:"client_id"`
+	ClientSecret  string    `json:"client_secret"`
+	RedirectURL   string    `json:"redirect_url,omitempty"`
+	Scopes        []string  `json:"scopes"`
+	AuthURL       string    `json:"auth_url"`
+	TokenURL      string    `json:"token_url"`
+	RefreshURL    string    `json:"refresh_url,omitempty"`
+	AccessToken   string    `json:"access_token"`
+	RefreshToken  string    `json:"refresh_token,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	TokenType     string    `json:"token_type"`
+	State         string    `json:"state,omitempty"`
+	CodeChallenge string    `json:"code_challenge,omitempty"` // PKCE code challenge (S256)
+	CodeVerifier  string    `json:"code_verifier,omitempty"`  // PKCE code verifier
 }
 
 // TokenInfo represents information about an authentication token

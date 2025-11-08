@@ -2,7 +2,7 @@
 
 # Go parameters
 GOCMD=go
-GOBUILD=$(GOCMD) build
+GOBUILD=GOAMD64=v1 $(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
@@ -47,7 +47,7 @@ run:
 
 # Cross-compilation
 linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 $(GOCMD) build -o $(BINARY_UNIX) -v .
 
 # Code quality
 lint:

@@ -2,7 +2,7 @@
 
 ## Reporting Security Issues
 
-The Cerebras MCP project takes security seriously. If you discover a security vulnerability in the `cerebras-code-mcp` package, please report it responsibly.
+The MCP Code API project takes security seriously. If you discover a security vulnerability in the `mcp-code-api` package, please report it responsibly.
 
 ### How to Report
 
@@ -53,5 +53,5 @@ Security updates are provided for:
 
 Please keep your installation up to date by running:
 ```bash
-npm update -g cerebras-code-mcp
+npm update -g mcp-code-api
 ```

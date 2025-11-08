@@ -1,6 +1,6 @@
-# Contributing to Cerebras MCP
+# Contributing to MCP Code API
 
-Thank you for your interest in contributing to the Cerebras MCP (Model Context Protocol) server! We welcome contributions from the community and are excited to collaborate with you.
+Thank you for your interest in contributing to the MCP Code API (Model Context Protocol) server! We welcome contributions from the community and are excited to collaborate with you.
 
 ## Getting Help and Support
 
@@ -12,7 +12,7 @@ If you have questions about the MCP server or need help:
 
 ## Reporting Issues
 
-If you encounter any bugs or have feature requests, please file them in our [GitHub issues](https://github.com/cerebras/cerebras-code-mcp/issues) with as much detail as possible.
+If you encounter any bugs or have feature requests, please file them in our [GitHub issues](https://github.com/cecil-the-coder/mcp-code-api/issues) with as much detail as possible.
 
 When reporting a bug, please include:
 - A clear description of the issue
@@ -34,8 +34,8 @@ When reporting a bug, please include:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/cerebras/cerebras-code-mcp.git
-   cd cerebras-code-mcp
+   git clone https://github.com/cecil-the-coder/mcp-code-api.git
+   cd mcp-code-api
    ```
 
 2. Install dependencies:
@@ -65,12 +65,7 @@ When reporting a bug, please include:
    node src/index.js --config
    ```
 
-3. **Test the removal wizard:**
-   ```bash
-   node src/index.js --remove
-   ```
-
-4. **Test with different IDEs:**
+3. **Test with different IDEs:**
    ```bash
    CEREBRAS_MCP_IDE=cursor CEREBRAS_API_KEY=your_key node src/index.js
    ```
@@ -125,7 +120,7 @@ The project follows these standards:
 - `src/index.js`: Main entry point and CLI handler
 - `src/server/mcp-server.js`: Core MCP server implementation
 - `src/server/tool-handlers.js`: Tool implementation (write tool)
-- `src/config/interactive-config.js`: Setup and removal wizards
+- `src/config/interactive-config.js`: Setup wizard
 - `src/config/constants.js`: Configuration constants and paths
 - `src/formatting/`: Response formatting for different IDEs
 - `src/api/`: API clients for Cerebras and OpenRouter
