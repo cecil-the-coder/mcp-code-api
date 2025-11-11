@@ -49,31 +49,27 @@ The server will:
 		// Load configuration
 		cfg := config.Load()
 
-		// Check API keys availability
+		// Check API keys availability (log to file only, not stderr)
 		if cfg.Providers.Cerebras == nil || cfg.Providers.Cerebras.APIKey == "" {
-			fmt.Fprintf(os.Stderr, "No Cerebras API key found\n")
-			fmt.Fprintf(os.Stderr, "Get your Cerebras API key at: https://cloud.cerebras.ai\n")
+			logger.Info("No Cerebras API key found")
 		} else {
-			fmt.Fprintf(os.Stderr, "Cerebras API key found\n")
 			logger.Info("Cerebras API key configured")
 		}
 
 		if cfg.Providers.OpenRouter == nil || cfg.Providers.OpenRouter.APIKey == "" {
-			fmt.Fprintf(os.Stderr, "No OpenRouter API key found\n")
-			fmt.Fprintf(os.Stderr, "Get your OpenRouter API key at: https://openrouter.ai/keys\n")
+			logger.Info("No OpenRouter API key found")
 		} else {
-			fmt.Fprintf(os.Stderr, "OpenRouter API key found (will be used as fallback)\n")
 			logger.Info("OpenRouter API key configured")
 		}
 
 		cerebrasAvail := cfg.Providers.Cerebras != nil && cfg.Providers.Cerebras.APIKey != ""
 		openrouterAvail := cfg.Providers.OpenRouter != nil && cfg.Providers.OpenRouter.APIKey != ""
 		if !cerebrasAvail && !openrouterAvail {
-			fmt.Fprintf(os.Stderr, "No API keys available. Server will not function properly.\n")
+			logger.Error("No API keys available")
 			return fmt.Errorf("no API keys configured")
 		}
 
-		fmt.Fprintf(os.Stderr, "Starting MCP server...\n")
+		logger.Info("Starting MCP server...")
 
 		// Create and start MCP server
 		ctx, cancel := context.WithCancel(context.Background())
@@ -91,21 +87,12 @@ The server will:
 
 		// Start the MCP server
 		server := mcp.NewServer(cfg)
+		logger.Info("MCP Server starting...")
 		if err := server.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start MCP server: %w", err)
 		}
 
-		fmt.Fprintf(os.Stderr, "🚀 MCP Server connected and ready with AUTO-INSTRUCTION SYSTEM!\n")
-		fmt.Fprintf(os.Stderr, "🚨 CRITICAL: Enhanced system_instructions will automatically enforce MCP tool usage\n")
-		fmt.Fprintf(os.Stderr, "🔧 write: MANDATORY tool for ALL code operations (file creation, generation, edits)\n")
-		fmt.Fprintf(os.Stderr, "✨ Models will automatically use write tool - no user instruction needed!\n")
-		if cfg.Providers.Cerebras != nil && cfg.Providers.Cerebras.APIKey != "" {
-			fmt.Fprintf(os.Stderr, "Primary: Cerebras API\n")
-		}
-		if cfg.Providers.OpenRouter != nil && cfg.Providers.OpenRouter.APIKey != "" {
-			fmt.Fprintf(os.Stderr, "Fallback: OpenRouter API\n")
-		}
-
+		logger.Info("MCP Server shut down gracefully")
 		return nil
 	},
 }

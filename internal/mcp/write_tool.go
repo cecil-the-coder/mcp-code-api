@@ -16,7 +16,7 @@ import (
 )
 
 // handleWriteTool handles the write tool request
-func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]interface{}) (*Response, error) {
+func (s *Server) handleWriteTool(ctx context.Context, request *Request, arguments *map[string]interface{}) (*Response, error) {
 	// Get IDE identification from environment variable
 	ideSource := os.Getenv("CEREBRAS_MCP_IDE")
 	if ideSource == "" {
@@ -70,7 +70,7 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 	// Route API call to appropriate provider to generate/modify code with context files
 	result, err := api.RouteAPICall(ctx, s.config, prompt, "", filePath, "", contextFiles)
 	if err != nil {
-		return s.createErrorResponse(err)
+		return s.createErrorResponse(request, err)
 	}
 
 	// Clean the AI response to remove markdown formatting
@@ -90,7 +90,7 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 			validationResult, err := validator.Validate(cleanResult, filePath)
 			if err != nil {
 				logger.Debugf("Validation error: %v", err)
-				return s.createErrorResponse(fmt.Errorf("validation error: %w", err))
+				return s.createErrorResponse(request, fmt.Errorf("validation error: %w", err))
 			}
 
 			if !validationResult.Valid {
@@ -109,17 +109,17 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 						if err != nil || !validationResult.Valid {
 							logger.Debug("Auto-fix validation failed")
 							errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
-							return s.createValidationErrorResponse(errorMsg)
+							return s.createValidationErrorResponse(request, errorMsg)
 						}
 					} else {
 						logger.Debugf("Auto-fix failed: %v", err)
 						errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
-						return s.createValidationErrorResponse(errorMsg)
+						return s.createValidationErrorResponse(request, errorMsg)
 					}
 				} else {
 					// No auto-fix available, return error to AI
 					errorMsg := validation.FormatValidationErrors(validationResult.Errors, language)
-					return s.createValidationErrorResponse(errorMsg)
+					return s.createValidationErrorResponse(request, errorMsg)
 				}
 			} else {
 				logger.Debug("Validation passed")
@@ -131,7 +131,7 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 
 	// Write the cleaned result to the file
 	if err := utils.WriteFileContent(filePath, cleanResult); err != nil {
-		return s.createErrorResponse(fmt.Errorf("failed to write file: %w", err))
+		return s.createErrorResponse(request, fmt.Errorf("failed to write file: %w", err))
 	}
 
 	// If write_only is enabled, return minimal response to save context
@@ -157,6 +157,7 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 
 		return &Response{
 			JSONRPC: "2.0",
+			ID:      request.ID,
 			Result: map[string]interface{}{
 				"content": responseContent,
 			},
@@ -181,6 +182,7 @@ func (s *Server) handleWriteTool(ctx context.Context, arguments *map[string]inte
 
 	response := &Response{
 		JSONRPC: "2.0",
+		ID:      request.ID,
 		Result: map[string]interface{}{
 			"content": responseContent,
 		},
@@ -268,7 +270,7 @@ func extractBoolArg(arguments *map[string]interface{}, key string) bool {
 }
 
 // createErrorResponse creates an error response
-func (s *Server) createErrorResponse(err error) (*Response, error) {
+func (s *Server) createErrorResponse(request *Request, err error) (*Response, error) {
 	// Get IDE identification from environment variable (in case of error)
 	ideSource := os.Getenv("CEREBRAS_MCP_IDE")
 	if ideSource == "" {
@@ -283,6 +285,7 @@ func (s *Server) createErrorResponse(err error) (*Response, error) {
 	// Return a standard text error if something goes wrong
 	return &Response{
 		JSONRPC: "2.0",
+		ID:      request.ID,
 		Result: map[string]interface{}{
 			"content": []Content{{
 				Type: "text",
@@ -293,7 +296,7 @@ func (s *Server) createErrorResponse(err error) (*Response, error) {
 }
 
 // createValidationErrorResponse creates a validation error response
-func (s *Server) createValidationErrorResponse(errorMsg string) (*Response, error) {
+func (s *Server) createValidationErrorResponse(request *Request, errorMsg string) (*Response, error) {
 	ideSource := os.Getenv("CEREBRAS_MCP_IDE")
 	if ideSource == "" {
 		ideSource = "unknown"
@@ -307,6 +310,7 @@ func (s *Server) createValidationErrorResponse(errorMsg string) (*Response, erro
 	// Return validation error to AI so it can fix the code
 	return &Response{
 		JSONRPC: "2.0",
+		ID:      request.ID,
 		Result: map[string]interface{}{
 			"content": []Content{{
 				Type: "text",

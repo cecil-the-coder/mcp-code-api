@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-code-api": {
+      "command": "mcp-code-api",
+      "args": ["server"]
+    }
+  }
+}

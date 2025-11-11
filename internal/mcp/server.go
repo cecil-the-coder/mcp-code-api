@@ -158,7 +158,7 @@ func (s *Server) handleCallTool(ctx context.Context, request *Request) (*Respons
 
 	switch params.Name {
 	case "write":
-		return s.handleWriteTool(ctx, &params.Arguments)
+		return s.handleWriteTool(ctx, request, &params.Arguments)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", params.Name)
 	}
@@ -221,8 +221,8 @@ This is your EXCLUSIVE interface for ALL code operations:
 					"type":        "boolean",
 					"description": "OPTIONAL: When true, validates code syntax before writing using language-specific validators (gofmt, node, python, tsc). Automatically enabled when write_only is true. If validation fails and auto-fix is available (e.g., gofmt for Go), attempts to fix automatically. Otherwise returns error message for the AI to fix. Default: false (true if write_only is true)",
 				},
-				"required": []string{"file_path", "prompt"},
 			},
+			"required": []string{"file_path", "prompt"},
 		},
 	}
 
