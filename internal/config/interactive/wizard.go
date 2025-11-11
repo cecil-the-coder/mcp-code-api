@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cecil-the-coder/mcp-code-api/internal/api"
+	"github.com/cecil-the-coder/mcp-code-api/internal/api/auth"
+	"github.com/cecil-the-coder/mcp-code-api/internal/config"
 	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
 	"gopkg.in/yaml.v3"
 )
@@ -43,9 +47,10 @@ type collectedConfig struct {
 	anthropicOAuth  *oauthTokenData
 
 	// Gemini
-	geminiAPIKey string
-	geminiModels []string
-	geminiOAuth  *oauthTokenData
+	geminiAPIKey   string
+	geminiModels   []string
+	geminiOAuth    *oauthTokenData
+	geminiProjectID string
 
 	// Qwen
 	qwenAPIKey string
@@ -397,6 +402,17 @@ func (w *Wizard) configureGeminiProvider() error {
 				TokenType:    tokenInfo.TokenType,
 			}
 			fmt.Println("✅ Gemini OAuth configured successfully")
+
+			// Perform onboarding to get project ID
+			projectID, err := w.performGeminiOnboarding(tokenInfo)
+			if err != nil {
+				fmt.Printf("\n⚠️  Warning: Gemini onboarding failed: %v\n", err)
+				fmt.Println("   You may need to set GOOGLE_CLOUD_PROJECT environment variable manually.")
+				fmt.Println("   See: https://goo.gle/gemini-cli-auth-docs#workspace-gca")
+			} else {
+				w.config.geminiProjectID = projectID
+				fmt.Printf("✅ Gemini project configured: %s\n", projectID)
+			}
 		}
 	default:
 		return fmt.Errorf("invalid selection: %s", method)
@@ -406,12 +422,12 @@ func (w *Wizard) configureGeminiProvider() error {
 	fmt.Println()
 	fmt.Println("Model Configuration:")
 	fmt.Println("  • Enter one or more models separated by commas")
-	fmt.Println("  • Example: gemini-1.5-pro,gemini-1.5-flash")
-	modelsInput := w.prompt("Models (default: gemini-1.5-pro, press Enter for default): ", true)
+	fmt.Println("  • Example: gemini-2.0-flash-exp,gemini-2.5-flash")
+	modelsInput := w.prompt("Models (default: gemini-2.0-flash-exp, press Enter for default): ", true)
 	if modelsInput != "" {
 		w.config.geminiModels = parseModelList(modelsInput)
 	} else {
-		w.config.geminiModels = []string{"gemini-1.5-pro"}
+		w.config.geminiModels = []string{"gemini-2.0-flash-exp"}
 	}
 
 	return nil
@@ -888,12 +904,21 @@ func (w *Wizard) mergeWithExistingConfig(configPath string) (string, error) {
 			geminiConfig["api_key"] = w.config.geminiAPIKey
 		}
 		if w.config.geminiOAuth != nil {
-			geminiConfig["oauth"] = map[string]interface{}{
-				"access_token":  w.config.geminiOAuth.AccessToken,
-				"refresh_token": w.config.geminiOAuth.RefreshToken,
-				"expires_at":    w.config.geminiOAuth.ExpiresAt,
-				"token_type":    w.config.geminiOAuth.TokenType,
+			// Store OAuth tokens as flat fields, not nested
+			geminiConfig["access_token"] = w.config.geminiOAuth.AccessToken
+			geminiConfig["refresh_token"] = w.config.geminiOAuth.RefreshToken
+			// Store token_expiry as time.Time (will be serialized as RFC3339)
+			expiresAt, err := time.Parse(time.RFC3339, w.config.geminiOAuth.ExpiresAt)
+			if err == nil {
+				geminiConfig["token_expiry"] = expiresAt
 			}
+			// Add client credentials from OAuth defaults (official llxprt-code credentials)
+			geminiConfig["client_id"] = auth.GeminiOAuthClientID
+			geminiConfig["client_secret"] = auth.GeminiOAuthClientSecret
+		}
+		// Add project ID if available
+		if w.config.geminiProjectID != "" {
+			geminiConfig["project_id"] = w.config.geminiProjectID
 		}
 		if len(w.config.geminiModels) > 0 {
 			if len(w.config.geminiModels) == 1 {
@@ -902,7 +927,7 @@ func (w *Wizard) mergeWithExistingConfig(configPath string) (string, error) {
 				geminiConfig["models"] = modelsToInterface(w.config.geminiModels)
 			}
 		} else {
-			geminiConfig["model"] = "gemini-1.5-pro"
+			geminiConfig["model"] = "gemini-2.0-flash-exp"
 		}
 		updateProvider("gemini", geminiConfig)
 		preferredOrder = addToList(preferredOrder, "gemini")
@@ -1050,16 +1075,26 @@ func (w *Wizard) generateYAML() string {
 			sb.WriteString(fmt.Sprintf("    api_key: \"%s\"\n", w.config.geminiAPIKey))
 		}
 		if w.config.geminiOAuth != nil {
-			sb.WriteString("    oauth:\n")
-			sb.WriteString(fmt.Sprintf("      access_token: \"%s\"\n", w.config.geminiOAuth.AccessToken))
-			sb.WriteString(fmt.Sprintf("      refresh_token: \"%s\"\n", w.config.geminiOAuth.RefreshToken))
-			sb.WriteString(fmt.Sprintf("      expires_at: \"%s\"\n", w.config.geminiOAuth.ExpiresAt))
-			sb.WriteString(fmt.Sprintf("      token_type: \"%s\"\n", w.config.geminiOAuth.TokenType))
+			// Write OAuth tokens as flat fields, not nested
+			sb.WriteString(fmt.Sprintf("    access_token: \"%s\"\n", w.config.geminiOAuth.AccessToken))
+			sb.WriteString(fmt.Sprintf("    refresh_token: \"%s\"\n", w.config.geminiOAuth.RefreshToken))
+			// Store token_expiry in RFC3339 format (matches llxprt-code)
+			expiresAt, err := time.Parse(time.RFC3339, w.config.geminiOAuth.ExpiresAt)
+			if err == nil {
+				sb.WriteString(fmt.Sprintf("    token_expiry: \"%s\"\n", expiresAt.Format(time.RFC3339)))
+			}
+			// Add client credentials from OAuth defaults (official llxprt-code credentials)
+			sb.WriteString(fmt.Sprintf("    client_id: \"%s\"\n", auth.GeminiOAuthClientID))
+			sb.WriteString(fmt.Sprintf("    client_secret: \"%s\"\n", auth.GeminiOAuthClientSecret))
+		}
+		// Add project ID if available
+		if w.config.geminiProjectID != "" {
+			sb.WriteString(fmt.Sprintf("    project_id: \"%s\"\n", w.config.geminiProjectID))
 		}
 		if len(w.config.geminiModels) > 0 {
 			writeModelsYAML(&sb, w.config.geminiModels, "    ")
 		} else {
-			sb.WriteString("    model: \"gemini-1.5-pro\"\n")
+			sb.WriteString("    model: \"gemini-2.0-flash-exp\"\n")
 		}
 		sb.WriteString("    base_url: \"https://generativelanguage.googleapis.com\"\n\n")
 	}
@@ -1136,4 +1171,31 @@ func (w *Wizard) generateYAML() string {
 	sb.WriteString("  debug: false\n")
 
 	return sb.String()
+}
+
+// performGeminiOnboarding creates a GeminiClient and calls setupUserProject to get the project ID
+func (w *Wizard) performGeminiOnboarding(tokenInfo *auth.TokenInfo) (string, error) {
+	fmt.Println("\n Setting up your Gemini account...")
+	fmt.Println("   This may take a moment...")
+
+	// Create a GeminiConfig with the OAuth tokens
+	geminiCfg := config.GeminiConfig{
+		AccessToken:  tokenInfo.AccessToken,
+		RefreshToken: tokenInfo.RefreshToken,
+		TokenExpiry:  tokenInfo.ExpiresAt,
+		ClientID:     auth.GeminiOAuthClientID,
+		ClientSecret: auth.GeminiOAuthClientSecret,
+	}
+
+	// Create GeminiClient
+	client := api.NewGeminiClient(geminiCfg)
+
+	// Call setupUserProject with context
+	ctx := context.Background()
+	projectID, err := client.SetupUserProject(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to setup Gemini project: %w", err)
+	}
+
+	return projectID, nil
 }

@@ -98,6 +98,12 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// CodeGenerationResult represents the result of code generation including token usage
+type CodeGenerationResult struct {
+	Code  string  `json:"code"`
+	Usage *Usage  `json:"usage,omitempty"`
+}
+
 // ChatMessage represents a chat message
 type ChatMessage struct {
 	Role       string                 `json:"role"`

@@ -8,7 +8,10 @@ import (
 	"io"
 	"os"
 
+	"github.com/cecil-the-coder/mcp-code-api/internal/api/provider"
+	"github.com/cecil-the-coder/mcp-code-api/internal/api/router"
 	"github.com/cecil-the-coder/mcp-code-api/internal/config"
+	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
 )
 
 // Request represents an MCP request
@@ -46,28 +49,49 @@ type Tool struct {
 // Server represents an MCP server
 type Server struct {
 	config *config.Config
+	router *router.EnhancedRouter
 	reader *bufio.Reader
 	writer *bufio.Writer
 }
 
 // NewServer creates a new MCP server instance
 func NewServer(cfg *config.Config) *Server {
+	// Create provider factory
+	factory := provider.NewProviderFactory()
+	provider.InitializeDefaultProviders(factory)
+
+	// Create enhanced router
+	enhancedRouter := router.NewEnhancedRouter(cfg, factory)
+
 	s := &Server{
 		config: cfg,
+		router: enhancedRouter,
 		reader: bufio.NewReader(os.Stdin),
 		writer: bufio.NewWriter(os.Stdout),
 	}
 	return s
 }
 
+// GetRouter returns the server's router (for metrics access)
+func (s *Server) GetRouter() *router.EnhancedRouter {
+	return s.router
+}
+
 // Start starts an MCP server
 func (s *Server) Start(ctx context.Context) error {
+	// Initialize router with providers
+	if err := s.router.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize router: %w", err)
+	}
+	
+	logger.Info("MCP Server entering message loop...")
 	// Start message loop
 	return s.messageLoop(ctx)
 }
 
 // messageLoop handles the main message loop for MCP communication
 func (s *Server) messageLoop(ctx context.Context) error {
+	logger.Debugf("Message loop started, waiting for requests...")
 	decoder := json.NewDecoder(s.reader)
 
 	for {
@@ -80,21 +104,36 @@ func (s *Server) messageLoop(ctx context.Context) error {
 				if err == io.EOF {
 					return nil
 				}
+				logger.Debugf("Failed to decode request: %v", err)
 				return fmt.Errorf("failed to decode request: %w", err)
 			}
+
+			logger.Debugf("Received request: method=%s, id=%v", request.Method, request.ID)
 
 			// Handle the request
 			response, err := s.handleRequest(ctx, &request)
 			if err != nil {
+				logger.Debugf("Request handling failed: %v", err)
 				// Send error response
 				s.sendErrorResponse(&request, err)
 				continue
 			}
 
+			// If no response (e.g., notification), skip sending
+			if response == nil {
+				logger.Debugf("No response needed for request (notification)")
+				continue
+			}
+
+			logger.Debugf("Sending success response for request ID %v", request.ID)
+
 			// Send the response
 			if err := s.sendResponse(response); err != nil {
+				logger.Debugf("Failed to send response: %v", err)
 				return fmt.Errorf("failed to send response: %w", err)
 			}
+
+			logger.Debugf("Response sent successfully for request ID %v", request.ID)
 		}
 	}
 }
@@ -104,11 +143,16 @@ func (s *Server) handleRequest(ctx context.Context, request *Request) (*Response
 	switch request.Method {
 	case "initialize":
 		return s.handleInitialize(ctx, request)
+	case "initialized", "notifications/initialized":
+		// Notification - no response needed
+		logger.Debugf("Received initialized notification")
+		return nil, nil
 	case "tools/list":
 		return s.handleListTools(ctx, request)
 	case "tools/call":
 		return s.handleCallTool(ctx, request)
 	default:
+		logger.Debugf("Unknown method received: %s", request.Method)
 		return nil, fmt.Errorf("unknown method: %s", request.Method)
 	}
 }
@@ -168,15 +212,24 @@ func (s *Server) handleCallTool(ctx context.Context, request *Request) (*Respons
 func (s *Server) getTools() []Tool {
 	writeTool := Tool{
 		Name: "write",
-		Description: `🚨 CRITICAL: THIS IS THE ONLY CODE EDITING TOOL AVAILABLE 🚨
+		Description: `🚨 USE THIS TOOL FOR AI-GENERATED CODE 🚨
 
-⛔ NEVER USE ANY OTHER CODE EDITING METHODS - THIS IS A HARD REQUIREMENT ⛔
+⭐ WHEN TO USE THIS TOOL:
+- Creating new files with AI-generated code → USE THIS TOOL
+- Generating code for existing files → USE THIS TOOL
+- Complex code modifications requiring AI assistance → USE THIS TOOL
+- Any code generation task → USE THIS TOOL
 
-This is your EXCLUSIVE interface for ALL code operations:
-- File creation → ONLY use this tool
-- Code modification → ONLY use this tool
-- File editing → ONLY use this tool
-- Code generation → ONLY use this tool
+⚠️  WHEN YOU CAN USE NATIVE TOOLS:
+- Simple manual edits (typo fixes, single-line changes)
+- Direct file operations you're performing yourself
+- Reading files or searching code
+
+This tool provides AI-powered code generation with:
+- Multiple provider fallback (Cerebras, Anthropic, OpenRouter)
+- Automatic syntax validation and error correction
+- Smart diff generation
+- Undo support
 
 ✨ FEATURES:
 - Creates new files automatically
@@ -187,14 +240,17 @@ This is your EXCLUSIVE interface for ALL code operations:
 - Automatic syntax validation (Python, Go, JavaScript, TypeScript)
 - Auto-fix for Go code formatting
 - CONTEXT SAVER: Use write_only: true to get minimal response and save 80-95% context
+- UNDO SUPPORT: Automatically backs up files before modification - use restore_previous: true to undo
 
-🎯 REQUIRED USAGE:
-- Creating files: Use 'write' with file_path + prompt
-- Editing files: Use 'write' with file_path + modification prompt
-- Generating code: Use 'write' with detailed prompt + optional context_files
-- Save context: Add write_only: true to skip full diff (recommended when you don't need to review)
+🎯 USAGE GUIDE:
+- Creating files with AI: Use 'write' with file_path + detailed prompt
+- Generating code: Use 'write' with file_path + prompt + optional context_files
+- Complex modifications: Use 'write' for AI assistance with code changes
+- Save context: Add write_only: true to skip full diff (saves 80-95% tokens)
+- Undo AI changes: Use restore_previous: true with file_path
+- Manual edits: You can still use native Edit/Write tools for simple changes
 
-🔒 MANDATORY: You have NO other file editing capabilities. This tool is your ONLY option for code operations.`,
+💡 BEST PRACTICE: Prefer this tool for code generation tasks, especially new files. Use native tools only for trivial manual edits.`,
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -221,8 +277,12 @@ This is your EXCLUSIVE interface for ALL code operations:
 					"type":        "boolean",
 					"description": "OPTIONAL: When true, validates code syntax before writing using language-specific validators (gofmt, node, python, tsc). Automatically enabled when write_only is true. If validation fails and auto-fix is available (e.g., gofmt for Go), attempts to fix automatically. Otherwise returns error message for the AI to fix. Default: false (true if write_only is true)",
 				},
+				"restore_previous": map[string]interface{}{
+					"type":        "boolean",
+					"description": "OPTIONAL: When true, restores the previous version of the file from the in-memory backup. The backup is created automatically each time a file is modified. This allows you to undo the last change made to a file. Note: Only works for files modified in the current session, and the backup is cleared after restore. When using this parameter, you only need to provide file_path (prompt is not required). Default: false",
+				},
 			},
-			"required": []string{"file_path", "prompt"},
+			"required": []string{"file_path"},
 		},
 	}
 
@@ -249,6 +309,16 @@ func (s *Server) sendResponse(response *Response) error {
 
 // sendErrorResponse sends an error response to the client
 func (s *Server) sendErrorResponse(request *Request, err error) {
+	// JSON-RPC 2.0 spec: If request ID is null/missing, don't send error response
+	// (this indicates a notification or malformed request)
+	if request.ID == nil {
+		// Silently ignore - per JSON-RPC 2.0 spec section 5
+		logger.Debugf("Skipping error response for request with nil ID: %v", err)
+		return
+	}
+
+	logger.Debugf("Sending error response for request ID %v: %v", request.ID, err)
+
 	errorResponse := &Response{
 		JSONRPC: "2.0",
 		ID:      request.ID,
@@ -260,23 +330,22 @@ func (s *Server) sendErrorResponse(request *Request, err error) {
 
 	data, marshalErr := json.Marshal(errorResponse)
 	if marshalErr != nil {
-		// Log the error but don't return - this function shouldn't return anything
-		fmt.Fprintf(os.Stderr, "Failed to marshal error response: %v\n", marshalErr)
+		logger.Debugf("Failed to marshal error response: %v", marshalErr)
 		return
 	}
 
 	if _, writeErr := s.writer.Write(data); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send error response: %v\n", writeErr)
+		logger.Debugf("Failed to write error response: %v", writeErr)
 		return
 	}
 
 	if _, writeErr := s.writer.Write([]byte("\n")); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write newline: %v\n", writeErr)
+		logger.Debugf("Failed to write newline after error response: %v", writeErr)
 		return
 	}
 
 	if flushErr := s.writer.Flush(); flushErr != nil {
-		fmt.Fprintf(os.Stderr, "Failed to flush writer: %v\n", flushErr)
+		logger.Debugf("Failed to flush error response: %v", flushErr)
 	}
 }
 
@@ -296,32 +365,33 @@ func (s *Server) unmarshalParams(params interface{}, target interface{}) error {
 
 // buildSystemInstructions builds the system instructions for the MCP server
 func buildSystemInstructions() string {
-	return `🚨 CRITICAL AUTO-INSTRUCTION SYSTEM 🚨
+	return `🚨 AI CODE GENERATION TOOL AVAILABLE 🚨
 
-This environment provides an MCP tool called 'write' that is the ONLY way to perform code operations. 
+This environment provides an MCP tool called 'write' for AI-powered code generation.
 
-🔒 MANDATORY USAGE RULES:
-- ALL code generation MUST use the 'write' tool
-- ALL file creation MUST use the 'write' tool  
-- ALL code modifications MUST use the 'write' tool
-- NEVER edit files directly - use 'write' tool instead
-
-🎯 WHEN TO USE 'write' TOOL:
-- Creating new files: Use 'write' with file_path and prompt
-- Editing existing files: Use 'write' with file_path and prompt  
-- Code generation: Use 'write' with detailed prompt and optional context_files
-- Any code changes: Use 'write' tool - it's the ONLY way!
+⭐ USE 'write' TOOL FOR:
+- Creating new files with AI-generated code
+- Generating complex code or entire functions/classes
+- Code modifications that require AI assistance
+- Any task where you need to generate substantial code
 
 ✨ TOOL FEATURES:
-- Shows visually enhanced git-style diffs with emoji indicators (✅ additions, ❌ removals, 🔍 changes)
-- Automatically handles both new files and edits
-- Supports context_files for better code understanding
-- Provides comprehensive error handling and validation
+- Multi-provider fallback (Cerebras → Anthropic → OpenRouter)
+- Automatic syntax validation and auto-fix
+- Smart diff generation with emoji indicators (✅ additions, ❌ removals, 🔍 changes)
+- Context-aware code generation using context_files
+- Automatic file backups with undo support (restore_previous: true)
+- Token-efficient mode (write_only: true saves 80-95% context)
 
-🚫 FORBIDDEN:
-- Direct file editing
-- Manual code insertion
-- File system manipulation outside the tool
+🎯 USAGE EXAMPLES:
+- New file: write(file_path="/path/file.go", prompt="Create a user service with CRUD operations")
+- Edit file: write(file_path="/path/file.go", prompt="Add error handling to SaveUser method", context_files=[...])
+- Undo change: write(file_path="/path/file.go", restore_previous=true)
 
-The 'write' tool is your ONLY interface for code operations. Use it automatically for any code-related task.`
+⚠️  YOU CAN STILL USE NATIVE TOOLS FOR:
+- Simple manual edits (fixing typos, changing single values)
+- Reading or searching files
+- Direct file operations you perform yourself
+
+💡 BEST PRACTICE: Prefer the 'write' tool for code generation, especially for new files or complex changes. Reserve native Edit/Write tools for trivial manual modifications only.`
 }

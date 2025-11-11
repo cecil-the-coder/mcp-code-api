@@ -3,9 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"time"
 
+	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 )
 
@@ -15,6 +18,7 @@ type Config struct {
 	Providers ProvidersConfig `mapstructure:"providers"`
 	Auth      AuthConfig      `mapstructure:"auth"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+	Metrics   MetricsConfig   `mapstructure:"metrics"`
 }
 
 // ServerConfig holds server-specific configuration
@@ -27,17 +31,19 @@ type ServerConfig struct {
 
 // ProvidersConfig holds provider configuration
 type ProvidersConfig struct {
-	Active     string            `mapstructure:"active"`
-	Primary    string            `mapstructure:"primary"`
-	Order      []string          `mapstructure:"preferred_order"`
-	Enabled    []string          `mapstructure:"enabled"`
-	OpenAI     *OpenAIConfig     `mapstructure:"openai"`
-	Anthropic  *AnthropicConfig  `mapstructure:"anthropic"`
-	Gemini     *GeminiConfig     `mapstructure:"gemini"`
-	Qwen       *QwenConfig       `mapstructure:"qwen"`
-	Synthetic  *SyntheticConfig  `mapstructure:"synthetic"`
-	Cerebras   *CerebrasConfig   `mapstructure:"cerebras"`
-	OpenRouter *OpenRouterConfig `mapstructure:"openrouter"`
+	Active        string              `mapstructure:"active"`
+	Primary       string              `mapstructure:"primary"`
+	Order         []string            `mapstructure:"preferred_order"`
+	Enabled       []string            `mapstructure:"enabled"`
+	OpenAI        *OpenAIConfig       `mapstructure:"openai"`
+	Anthropic     *AnthropicConfig    `mapstructure:"anthropic"`
+	Gemini        *GeminiConfig       `mapstructure:"gemini"`
+	Qwen          *QwenConfig         `mapstructure:"qwen"`
+	Synthetic     *SyntheticConfig    `mapstructure:"synthetic"`
+	Cerebras      *CerebrasConfig     `mapstructure:"cerebras"`
+	OpenRouter    *OpenRouterConfig   `mapstructure:"openrouter"`
+	Racing        *RacingConfig       `mapstructure:"racing"`        // Virtual provider for racing
+	RacingClever  *RacingConfig       `mapstructure:"racing-clever"` // Virtual provider for clever racing
 	// Alias providers (built-in)
 	Aliases map[string]ProviderConfig `mapstructure:"aliases"`
 	// Custom providers (user-defined)
@@ -89,10 +95,11 @@ type OpenAIConfig struct {
 
 // AnthropicConfig holds Anthropic-specific configuration
 type AnthropicConfig struct {
-	APIKey  string   `mapstructure:"api_key"`
-	APIKeys []string `mapstructure:"api_keys,omitempty"` // Multiple API keys for load balancing
-	BaseURL string   `mapstructure:"base_url,omitempty"`
-	Model   string   `mapstructure:"model,omitempty"`
+	DisplayName string   `mapstructure:"display_name,omitempty"` // Optional display name for provider (e.g., "z.ai")
+	APIKey      string   `mapstructure:"api_key"`
+	APIKeys     []string `mapstructure:"api_keys,omitempty"` // Multiple API keys for load balancing
+	BaseURL     string   `mapstructure:"base_url,omitempty"`
+	Model       string   `mapstructure:"model,omitempty"`
 
 	// OAuth configuration
 	ClientID     string   `mapstructure:"client_id,omitempty"`
@@ -116,6 +123,15 @@ type GeminiConfig struct {
 	Scopes       []string `mapstructure:"scopes,omitempty"`
 	TokenURL     string   `mapstructure:"token_url,omitempty"`
 	AuthURL      string   `mapstructure:"auth_url,omitempty"`
+
+	// OAuth tokens (populated after authentication)
+	AccessToken  string    `mapstructure:"access_token,omitempty"`
+	RefreshToken string    `mapstructure:"refresh_token,omitempty"`
+	TokenExpiry  time.Time `mapstructure:"token_expiry,omitempty"` // RFC3339 format
+	DisplayName  string    `mapstructure:"display_name,omitempty"`
+
+	// Cloud Code API project ID (free tier users get this from server during onboarding)
+	ProjectID string `mapstructure:"project_id,omitempty"`
 }
 
 // QwenConfig holds Qwen-specific configuration
@@ -142,6 +158,7 @@ type SyntheticConfig struct {
 
 // CerebrasConfig holds Cerebras API configuration
 type CerebrasConfig struct {
+	DisplayName string   `mapstructure:"display_name,omitempty"` // Optional display name for provider
 	APIKey      string   `mapstructure:"api_key"`
 	APIKeys     []string `mapstructure:"api_keys,omitempty"` // Multiple API keys for load balancing
 	Model       string   `mapstructure:"model"`
@@ -152,12 +169,24 @@ type CerebrasConfig struct {
 
 // OpenRouterConfig holds OpenRouter API configuration
 type OpenRouterConfig struct {
-	APIKey   string   `mapstructure:"api_key"`
-	APIKeys  []string `mapstructure:"api_keys,omitempty"` // Multiple API keys for load balancing
-	Model    string   `mapstructure:"model,omitempty"`
-	SiteURL  string   `mapstructure:"site_url,omitempty"`
-	SiteName string   `mapstructure:"site_name,omitempty"`
-	BaseURL  string   `mapstructure:"base_url,omitempty"`
+	APIKey        string   `mapstructure:"api_key"`
+	APIKeys       []string `mapstructure:"api_keys,omitempty"`       // Multiple API keys for load balancing
+	Model         string   `mapstructure:"model,omitempty"`          // Single model (fallback if models list empty)
+	Models        []string `mapstructure:"models,omitempty"`         // List of models to use
+	ModelStrategy string   `mapstructure:"model_strategy,omitempty"` // Strategy: "failover", "round-robin", "random"
+	FreeOnly      bool     `mapstructure:"free_only,omitempty"`      // If true, automatically append :free suffix to model names
+	SiteURL       string   `mapstructure:"site_url,omitempty"`
+	SiteName      string   `mapstructure:"site_name,omitempty"`
+	BaseURL       string   `mapstructure:"base_url,omitempty"`
+}
+
+// RacingConfig holds configuration for racing virtual providers
+type RacingConfig struct {
+	Models          []string `mapstructure:"models"`                     // Provider:model strings (e.g., "openrouter:deepseek/deepseek-chat-v3.1:free")
+	NumRacers       int      `mapstructure:"num_racers,omitempty"`       // How many models to race (0 = race all)
+	GracePeriodMS   int      `mapstructure:"grace_period_ms,omitempty"`  // Milliseconds to wait after first win for performance profiling
+	SlownessThreshold float64 `mapstructure:"slowness_threshold,omitempty"` // Multiplier for slowness detection (default 2.5)
+	EnableStatePersistence bool `mapstructure:"enable_state_persistence,omitempty"` // Save model performance to disk
 }
 
 // AuthConfig holds authentication configuration
@@ -192,6 +221,13 @@ type LoggingConfig struct {
 	Debug   bool   `mapstructure:"debug"`
 }
 
+// MetricsConfig holds metrics/monitoring configuration
+type MetricsConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Port    int    `mapstructure:"port"`
+	Host    string `mapstructure:"host"`
+}
+
 // Load loads configuration from environment variables and config files
 func Load() *Config {
 	// Set defaults
@@ -209,6 +245,11 @@ func Load() *Config {
 	viper.SetDefault("logging.verbose", false)
 	viper.SetDefault("logging.debug", false)
 
+	// Metrics defaults
+	viper.SetDefault("metrics.enabled", false)
+	viper.SetDefault("metrics.port", 8080)
+	viper.SetDefault("metrics.host", "localhost")
+
 	// OpenAI defaults
 	viper.SetDefault("providers.openai.api_key", "")
 	viper.SetDefault("providers.openai.base_url", "https://api.openai.com/v1")
@@ -222,8 +263,8 @@ func Load() *Config {
 
 	// Gemini defaults
 	viper.SetDefault("providers.gemini.api_key", "")
-	viper.SetDefault("providers.gemini.base_url", "https://generativelanguage.googleapis.com")
-	viper.SetDefault("providers.gemini.model", "gemini-1.5-pro")
+	viper.SetDefault("providers.gemini.base_url", "") // Auto-detect based on auth method
+	viper.SetDefault("providers.gemini.model", "gemini-2.0-flash-exp")
 
 	// Qwen defaults
 	viper.SetDefault("providers.qwen.api_key", "")
@@ -242,11 +283,45 @@ func Load() *Config {
 	viper.SetDefault("providers.openrouter.site_name", "MCP Code API")
 	viper.SetDefault("providers.openrouter.base_url", "https://openrouter.ai/api")
 	viper.SetDefault("providers.openrouter.model", "qwen/qwen3-coder")
+	viper.SetDefault("providers.openrouter.model_strategy", "failover") // Default: failover
+	viper.SetDefault("providers.openrouter.free_only", false)
+
+	// Racing defaults
+	viper.SetDefault("providers.racing.num_racers", 0) // 0 = race all models
+	viper.SetDefault("providers.racing.grace_period_ms", 500)
+	viper.SetDefault("providers.racing.slowness_threshold", 2.5)
+	viper.SetDefault("providers.racing.enable_state_persistence", false)
+
+	// Racing-Clever defaults
+	viper.SetDefault("providers.racing-clever.num_racers", 0) // 0 = race all models
+	viper.SetDefault("providers.racing-clever.grace_period_ms", 500)
+	viper.SetDefault("providers.racing-clever.slowness_threshold", 2.5)
+	viper.SetDefault("providers.racing-clever.enable_state_persistence", false)
 
 	// Auth defaults
 	viper.SetDefault("auth.token_store.type", "file")
 	viper.SetDefault("auth.token_store.path", "~/.mcp-code-api/tokens")
 	viper.SetDefault("auth.token_store.encryption_key", "mcp-code-api-token-key")
+
+	// Configure config file location
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+
+	// Add config paths (viper doesn't expand $HOME, so do it manually)
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		viper.AddConfigPath(homeDir + "/.mcp-code-api")
+	}
+	viper.AddConfigPath(".")
+
+	// Read config file
+	if err := viper.ReadInConfig(); err != nil {
+		// Config file not found or error reading - use defaults
+		// This is not a fatal error, just continue with defaults
+		logger.Warnf("Failed to read config file: %v - using defaults", err)
+	} else {
+		logger.Infof("Successfully loaded config from: %s", viper.ConfigFileUsed())
+	}
 
 	// Configure environment variable binding
 	viper.AutomaticEnv()
@@ -273,8 +348,26 @@ func Load() *Config {
 	bindLegacyEnv("providers.openrouter.base_url", "OPENROUTER_BASE_URL")
 
 	var cfg Config
-	if err := viper.Unmarshal(&cfg); err != nil {
+
+	// Configure unmarshal with custom decode hooks for time.Time
+	// Compose with default hooks to preserve standard conversions
+	err = viper.Unmarshal(&cfg, viper.DecodeHook(
+		mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+			func(f, t reflect.Type, data interface{}) (interface{}, error) {
+				// Handle string to time.Time conversion for RFC3339 timestamps
+				if f.Kind() == reflect.String && t == reflect.TypeOf(time.Time{}) {
+					return time.Parse(time.RFC3339, data.(string))
+				}
+				return data, nil
+			},
+		),
+	))
+
+	if err != nil {
 		// Return default config if unmarshal fails
+		logger.Warnf("Failed to unmarshal config: %v", err)
 		return &Config{}
 	}
 

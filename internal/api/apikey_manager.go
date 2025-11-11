@@ -52,6 +52,28 @@ func NewAPIKeyManager(providerName string, keys []string) *APIKeyManager {
 	return manager
 }
 
+// GetCurrentKey returns the first available API key without advancing the round-robin counter
+// This is useful for queries that don't need load balancing (e.g., rate limit checks)
+func (m *APIKeyManager) GetCurrentKey() string {
+	if len(m.keys) == 0 {
+		return ""
+	}
+
+	// Try to find the first available key
+	for _, key := range m.keys {
+		m.mu.RLock()
+		health := m.keyHealth[key]
+		m.mu.RUnlock()
+
+		if m.isKeyAvailable(key, health) {
+			return key
+		}
+	}
+
+	// If all keys are in backoff, return the first key anyway
+	return m.keys[0]
+}
+
 // GetNextKey returns the next available API key using round-robin load balancing
 // It skips keys that are currently in backoff due to failures
 func (m *APIKeyManager) GetNextKey() (string, error) {

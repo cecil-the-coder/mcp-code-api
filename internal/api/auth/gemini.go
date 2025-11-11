@@ -3,6 +3,15 @@ package auth
 import (
 	"context"
 	"fmt"
+
+	"github.com/cecil-the-coder/mcp-code-api/internal/oauth"
+)
+
+// Official Google OAuth credentials from llxprt-code project
+// Source: https://github.com/google/llxprt-code
+var (
+	GeminiOAuthClientID     = oauth.GeminiOAuth.ClientID
+	GeminiOAuthClientSecret = oauth.GeminiOAuth.ClientSecret
 )
 
 // GeminiOAuthConfig returns the OAuth configuration for Google Gemini

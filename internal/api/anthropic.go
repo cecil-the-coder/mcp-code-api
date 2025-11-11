@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cecil-the-coder/mcp-code-api/internal/api/types"
 	"github.com/cecil-the-coder/mcp-code-api/internal/config"
 	"github.com/cecil-the-coder/mcp-code-api/internal/logger"
 	"github.com/cecil-the-coder/mcp-code-api/internal/utils"
@@ -21,6 +22,7 @@ type AnthropicClient struct {
 	config     config.AnthropicConfig
 	client     *http.Client
 	keyManager *APIKeyManager
+	lastUsage  *types.Usage  // Store last token usage
 }
 
 // NewAnthropicClient creates a new Anthropic client
@@ -44,9 +46,9 @@ func NewAnthropicClient(cfg config.AnthropicConfig) *AnthropicClient {
 }
 
 // GenerateCode generates code using the Anthropic API with automatic failover
-func (c *AnthropicClient) GenerateCode(ctx context.Context, prompt, contextStr, outputFile string, language *string, contextFiles []string) (string, error) {
+func (c *AnthropicClient) GenerateCode(ctx context.Context, prompt, contextStr, outputFile string, language *string, contextFiles []string) (*types.CodeGenerationResult, error) {
 	if c.keyManager == nil {
-		return "", fmt.Errorf("no Anthropic API key configured")
+		return nil, fmt.Errorf("no Anthropic API key configured")
 	}
 
 	// Determine language from file extension or explicit parameter
@@ -59,12 +61,21 @@ func (c *AnthropicClient) GenerateCode(ctx context.Context, prompt, contextStr, 
 	requestData := c.prepareRequest(fullPrompt, detectedLanguage)
 
 	// Use failover to try multiple API keys if needed
-	return c.keyManager.ExecuteWithFailover(func(apiKey string) (string, error) {
+	code, err := c.keyManager.ExecuteWithFailover(func(apiKey string) (string, error) {
 		// Make the API call with this specific key
 		response, err := c.makeAPICallWithKey(ctx, requestData, apiKey)
 		if err != nil {
 			return "", err
 		}
+
+		// Store usage information
+		c.lastUsage = &types.Usage{
+			PromptTokens:     response.Usage.InputTokens,
+			CompletionTokens: response.Usage.OutputTokens,
+			TotalTokens:      response.Usage.InputTokens + response.Usage.OutputTokens,
+		}
+		logger.Debugf("Anthropic: Extracted token usage - Prompt: %d, Completion: %d, Total: %d",
+			c.lastUsage.PromptTokens, c.lastUsage.CompletionTokens, c.lastUsage.TotalTokens)
 
 		// Extract and clean the content
 		if len(response.Content) == 0 {
@@ -75,6 +86,22 @@ func (c *AnthropicClient) GenerateCode(ctx context.Context, prompt, contextStr, 
 
 		return cleanedContent, nil
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Return result with usage information
+	result := &types.CodeGenerationResult{
+		Code:  code,
+		Usage: c.lastUsage,
+	}
+	if result.Usage != nil {
+		logger.Debugf("Anthropic: Returning result with usage - Total tokens: %d", result.Usage.TotalTokens)
+	} else {
+		logger.Warnf("Anthropic: Returning result with nil usage")
+	}
+	return result, nil
 }
 
 // buildFullPrompt builds the complete prompt including context and existing content

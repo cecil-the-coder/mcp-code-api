@@ -78,6 +78,7 @@ func (p *GeminiProvider) GetModels(ctx context.Context) ([]provider.Model, error
 	// TODO: Implement actual Gemini models API call
 	// For now, return static list
 	models := []provider.Model{
+		{ID: "gemini-2.0-flash-exp", Name: "Gemini 2.0 Flash Experimental", Provider: p.Type(), MaxTokens: 1048576, SupportsStreaming: true, SupportsToolCalling: true, Description: "Google's latest experimental flash model"},
 		{ID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro", Provider: p.Type(), MaxTokens: 30720, SupportsStreaming: true, SupportsToolCalling: true, Description: "Google's most capable model"},
 		{ID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash", Provider: p.Type(), MaxTokens: 1048576, SupportsStreaming: true, SupportsToolCalling: true, Description: "Google's fastest model"},
 		{ID: "gemini-1.0-pro", Name: "Gemini 1.0 Pro", Provider: p.Type(), MaxTokens: 512000, SupportsStreaming: true, SupportsToolCalling: true, Description: "Google's balanced model"},
@@ -94,7 +95,7 @@ func (p *GeminiProvider) GetDefaultModel() string {
 	if config.DefaultModel != "" {
 		return config.DefaultModel
 	}
-	return "gemini-1.5-pro" // Default to latest capable model
+	return "gemini-2.0-flash-exp" // Default to latest experimental model
 }
 
 // GenerateChatCompletion generates a chat completion

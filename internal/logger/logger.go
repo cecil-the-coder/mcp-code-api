@@ -142,10 +142,7 @@ func logWithLevel(level LogLevel, msg string) {
 	levelStr := levelString(level)
 	logMessage := fmt.Sprintf("[%s] %s: %s", timestamp, levelStr, msg)
 
-	// Always write to stderr
-	fmt.Fprintf(os.Stderr, "%s\n", logMessage)
-
-	// Write to file if configured and not in stderr-only mode
+	// Write to file if configured, otherwise write to stderr
 	if !onlyStderr && logFile != nil {
 		logMutex.Lock()
 		defer logMutex.Unlock()
@@ -153,6 +150,9 @@ func logWithLevel(level LogLevel, msg string) {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "%s\n", logMessage)
 		}
+	} else {
+		// Only write to stderr if no log file is configured
+		fmt.Fprintf(os.Stderr, "%s\n", logMessage)
 	}
 }
 
